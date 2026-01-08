@@ -3,23 +3,63 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
     CheckCircle, XCircle, AlertCircle, Download,
-    ChevronLeft, ChevronRight, Filter,
-    ArrowLeft, Edit2, History
+    Filter, ArrowLeft, History, RotateCcw,
+    FileText, Check, X
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetHeader,
-    SheetTitle,
-    SheetFooter,
-} from "@/components/ui/sheet";
+    Pagination,
+    PaginationContent,
+    PaginationItem,
+    PaginationLink,
+    PaginationNext,
+    PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+    Drawer,
+    DrawerClose,
+    DrawerContent,
+    DrawerDescription,
+    DrawerHeader,
+    DrawerTitle,
+} from "@/components/ui/drawer";
+import {
+    Form,
+    FormControl,
+    FormField,
+    FormItem,
+    FormLabel,
+    FormMessage,
+} from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+
+const formSchema = z.object({
+    name: z.string().min(1, "Name is required"),
+    phone: z.string().min(1, "Phone is required"),
+    date: z.string().optional(),
+    city: z.string().optional(),
+    reason: z.string().min(2, "Reason must be at least 2 characters"),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 interface Record {
     id: number;
@@ -68,10 +108,28 @@ export default function BatchDetail() {
 
     // Edit State
     const [editingRecord, setEditingRecord] = useState<Record | null>(null);
-    const [editForm, setEditForm] = useState<Partial<Record>>({});
-    const [editReason, setEditReason] = useState("");
     const [history, setHistory] = useState<RecordVersion[]>([]);
-    const [showHistory, setShowHistory] = useState(false);
+
+    const form = useForm<FormValues>({
+        resolver: zodResolver(formSchema),
+        defaultValues: {
+            name: "",
+            phone: "",
+            date: "",
+            city: "",
+            reason: "",
+        },
+    });
+
+    const [editingVersionId, setEditingVersionId] = useState<number | null>(null);
+    const [tempReason, setTempReason] = useState("");
+    const [rollbackVersionId, setRollbackVersionId] = useState<number | null>(null);
+
+    const fetchHistory = (recordId: number) => {
+        fetch(`http://localhost:8080/api/records/${recordId}/history`)
+            .then(res => res.json())
+            .then(data => setHistory(data || []));
+    };
 
     // Fetch Batch Info & Records
     useEffect(() => {
@@ -111,35 +169,136 @@ export default function BatchDetail() {
     // Edit Logic
     const handleEditClick = (record: Record) => {
         setEditingRecord(record);
-        setEditForm({ ...record });
-        setEditReason("");
+        form.reset({
+            name: record.name,
+            phone: record.phone,
+            date: record.date,
+            city: record.city,
+            reason: "",
+        });
         setHistory([]);
-        // Fetch history
-        fetch(`http://localhost:8080/api/records/${record.id}/history`)
-            .then(res => res.json())
-            .then(data => setHistory(data || []));
+        fetchHistory(record.id);
     };
 
-    const handleSaveEdit = async () => {
+    const handleSaveEdit = async (values: FormValues) => {
         if (!editingRecord) return;
         try {
             const res = await fetch(`http://localhost:8080/api/records/${editingRecord.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    updates: editForm,
-                    reason: editReason || "Manual correction"
+                    updates: {
+                        name: values.name,
+                        phone: values.phone,
+                        date: values.date,
+                        city: values.city,
+                    },
+                    reason: values.reason
                 })
             });
+            const data = await res.json();
             if (res.ok) {
-                setEditingRecord(null);
-                fetchRecords(); // Refresh list
-                fetchBatchData(); // Refresh stats
+                // Done
+                form.reset({ ...values, reason: "" });
+                fetchRecords();
+                fetchBatchData();
+                fetchHistory(editingRecord.id);
+                toast.success("Correction saved successfully");
+            } else if (data.error === "NO_CHANGES_DETECTED") {
+                toast.info("No changes detected. Please modify a field or cancel.");
             } else {
-                alert("Failed to update");
+                toast.error("Failed to update: " + (data.error || res.statusText));
             }
         } catch (err) {
             console.error(err);
+            toast.error("Network error");
+        }
+    };
+
+    const handleRollback = async (versionId: number) => {
+        if (!editingRecord) return;
+
+        try {
+            const res = await fetch(`http://localhost:8080/api/records/${editingRecord.id}/rollback/${versionId}`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (res.ok) {
+                // Update form fields with restored data
+                form.reset({
+                    name: data.name,
+                    phone: data.phone,
+                    date: data.date,
+                    city: data.city,
+                    reason: "",
+                });
+                fetchRecords();
+                fetchHistory(editingRecord.id);
+                setRollbackVersionId(null);
+                toast.success("Rollback successful");
+            } else {
+                toast.error("Rollback failed: " + data.error);
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error("Network error");
+        }
+    };
+
+    const handleUpdateReason = async (versionId: number) => {
+        try {
+            const res = await fetch(`http://localhost:8080/api/versions/${versionId}/reason`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: tempReason })
+            });
+            if (res.ok) {
+                setEditingVersionId(null);
+                if (editingRecord) fetchHistory(editingRecord.id);
+                toast.success("Reason updated");
+            } else {
+                toast.error("Failed to update reason");
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error("Network error");
+        }
+    };
+
+    const renderDiff = (before: string, after: string) => {
+        try {
+            const b = JSON.parse(before) as any;
+            const a = JSON.parse(after) as any;
+            const fieldMap: { [key: string]: string } = {
+                'name': 'name',
+                'phone': 'phone',
+                'date': 'date',
+                'city': 'city'
+            };
+            const changes = Object.entries(fieldMap).filter(([_, backendKey]) => String(b[backendKey] || '') !== String(a[backendKey] || ''));
+
+            if (changes.length === 0) return null;
+
+            return (
+                <div className="mt-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800 font-mono text-[10px] leading-tight">
+                    {changes.map(([frontendKey, backendKey]) => (
+                        <div key={frontendKey} className="flex flex-col border-b border-slate-100 dark:border-slate-800 last:border-0">
+                            <div className="bg-red-50/70 dark:bg-red-950/30 text-red-700 dark:text-red-400 px-2 py-1 flex items-start gap-1">
+                                <span className="w-4 shrink-0 opacity-50">-</span>
+                                <span className="font-bold min-w-[45px] uppercase opacity-70">{frontendKey}:</span>
+                                <span className="break-all">{String(b[backendKey] || '(empty)')}</span>
+                            </div>
+                            <div className="bg-green-50/70 dark:bg-green-950/30 text-green-700 dark:text-green-400 px-2 py-1 flex items-start gap-1">
+                                <span className="w-4 shrink-0 opacity-50">+</span>
+                                <span className="font-bold min-w-[45px] uppercase opacity-70">{frontendKey}:</span>
+                                <span className="break-all font-semibold">{String(a[backendKey] || '(empty)')}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        } catch (e) {
+            return null;
         }
     };
 
@@ -162,53 +321,32 @@ export default function BatchDetail() {
                     </div>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" onClick={handleDownload}>
+                    <Button onClick={handleDownload}>
                         <Download className="mr-2 h-4 w-4" /> Export Excel
                     </Button>
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="bg-blue-50/50 border-blue-100">
-                    <CardContent className="p-6 flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-medium text-blue-600">Total Rows</p>
-                            <h2 className="text-3xl font-bold text-blue-700">{batch.total_rows}</h2>
-                        </div>
-                        <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
-                            <Filter className="h-5 w-5 text-blue-600" />
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="bg-green-50/50 border-green-100">
-                    <CardContent className="p-6 flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-medium text-green-600">Clean Records</p>
-                            <h2 className="text-3xl font-bold text-green-700">{batch.success_count}</h2>
-                        </div>
-                        <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center">
-                            <CheckCircle className="h-5 w-5 text-green-600" />
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="bg-red-50/50 border-red-100">
-                    <CardContent className="p-6 flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-medium text-red-600">Issues Found</p>
-                            <h2 className="text-3xl font-bold text-red-700">{batch.failure_count}</h2>
-                        </div>
-                        <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center">
-                            <AlertCircle className="h-5 w-5 text-red-600" />
-                        </div>
-                    </CardContent>
-                </Card>
+            {/* Stats Bar */}
+            <div className="flex flex-wrap items-center gap-4 py-2">
+                <div className="flex items-center gap-2 px-4 py-2 bg-blue-50/50 text-blue-700 rounded-lg border border-blue-100 shadow-sm">
+                    <Filter className="h-4 w-4" />
+                    <span className="font-medium">Total: {batch.total_rows.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 bg-green-50/50 text-green-700 rounded-lg border border-green-100 shadow-sm">
+                    <CheckCircle className="h-4 w-4" />
+                    <span className="font-medium">Valid: {batch.success_count.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 bg-red-50/50 text-red-700 rounded-lg border border-red-100 shadow-sm">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="font-medium">Issues: {batch.failure_count.toLocaleString()}</span>
+                </div>
             </div>
 
             {/* Data Table Section */}
-            <Card>
-                <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
-                    <Tabs value={filter} onValueChange={setFilter} className="w-[400px]">
+            <Card className="pt-0 gap-0!">
+                <CardHeader className="p-2! pb-0!  border-b">
+                    <Tabs value={filter} onValueChange={setFilter} >
                         <TabsList>
                             <TabsTrigger value="all">All Records</TabsTrigger>
                             <TabsTrigger value="clean" className="data-[state=active]:text-green-700">Valid</TabsTrigger>
@@ -216,7 +354,9 @@ export default function BatchDetail() {
                         </TabsList>
                     </Tabs>
                 </CardHeader>
-                <CardContent className="p-0">
+                <CardContent className='p-0'>
+
+
                     <div className="border-b bg-muted/40 grid grid-cols-12 gap-4 p-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                         <div className="col-span-1">#</div>
                         <div className="col-span-2">Name</div>
@@ -258,8 +398,13 @@ export default function BatchDetail() {
                                     )}
                                 </div>
                                 <div className="col-span-2 flex justify-end">
-                                    <Button variant="ghost" size="sm" onClick={() => handleEditClick(record)}>
-                                        <Edit2 className="h-4 w-4 mr-1" /> Edit
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-3 text-xs bg-background hover:bg-muted/50 border-border/60 shadow-xs transition-all flex items-center gap-1.5 font-medium"
+                                        onClick={() => handleEditClick(record)}
+                                    >
+                                        Edit
                                     </Button>
                                 </div>
                             </motion.div>
@@ -267,113 +412,248 @@ export default function BatchDetail() {
                     </div>
 
                     {/* Pagination */}
-                    <div className="p-4 border-t flex items-center justify-between">
-                        <div className="text-sm text-muted-foreground">
-                            Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, total)} of {total} entries
-                        </div>
-                        <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-                                <ChevronLeft className="h-4 w-4" />
-                            </Button>
-                            <Button variant="outline" size="sm" disabled={page * pageSize >= total} onClick={() => setPage(p => p + 1)}>
-                                <ChevronRight className="h-4 w-4" />
-                            </Button>
-                        </div>
+                    <div className="pt-2 border-t">
+                        <Pagination>
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                                        aria-disabled={page === 1}
+                                        className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+                                {(() => {
+                                    const totalPages = Math.ceil(total / pageSize);
+                                    let start = Math.max(0, Math.min(page - 3, totalPages - 5));
+                                    if (start < 0) start = 0;
+                                    let end = Math.min(totalPages, start + 5);
+
+                                    return Array.from({ length: totalPages }, (_, i) => i + 1)
+                                        .slice(start, end)
+                                        .map((p) => (
+                                            <PaginationItem key={p}>
+                                                <PaginationLink
+                                                    isActive={page === p}
+                                                    onClick={() => setPage(p)}
+                                                    className="cursor-pointer"
+                                                >
+                                                    {p}
+                                                </PaginationLink>
+                                            </PaginationItem>
+                                        ));
+                                })()}
+                                <PaginationItem>
+                                    <PaginationNext
+                                        onClick={() => setPage(p => Math.min(Math.ceil(total / pageSize), p + 1))}
+                                        aria-disabled={page * pageSize >= total}
+                                        className={page * pageSize >= total ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* Edit Sheet */}
-            <Sheet open={!!editingRecord} onOpenChange={(open) => !open && setEditingRecord(null)}>
-                <SheetContent className="overflow-y-auto sm:max-w-md w-full">
-                    <SheetHeader>
-                        <SheetTitle>Edit Record #{editingRecord?.row_index}</SheetTitle>
-                        <SheetDescription>
-                            Make corrections to the data manually. Changes will be versioned.
-                        </SheetDescription>
-                    </SheetHeader>
+            {/* Edit Drawer */}
+            <Drawer open={!!editingRecord} onOpenChange={(open) => !open && setEditingRecord(null)}>
+                <DrawerContent>
+                    <div className="mx-auto w-full max-w-7xl px-8 pb-12">
+                        <DrawerHeader className="px-0 pt-10 pb-6">
+                            <DrawerTitle className="text-3xl font-bold tracking-tight">Edit Record #{editingRecord?.row_index}</DrawerTitle>
+                            <DrawerDescription className="text-sm">
+                                Manual correction for detected data issues. All changes are logged in version history.
+                            </DrawerDescription>
+                        </DrawerHeader>
 
-                    {editingRecord && (
-                        <div className="space-y-6 py-6">
-                            <div className="space-y-2">
-                                <Label>Data Fields</Label>
-                                <div className="grid gap-3">
-                                    <div className="grid grid-cols-3 items-center gap-4">
-                                        <Label className="text-right">Name</Label>
-                                        <Input
-                                            value={editForm.name || ''}
-                                            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                                            className="col-span-2"
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-3 items-center gap-4">
-                                        <Label className="text-right">Phone</Label>
-                                        <Input
-                                            value={editForm.phone || ''}
-                                            onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                                            className="col-span-2"
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-3 items-center gap-4">
-                                        <Label className="text-right">Date</Label>
-                                        <Input
-                                            value={editForm.date || ''}
-                                            onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
-                                            className="col-span-2"
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-3 items-center gap-4">
-                                        <Label className="text-right">Location</Label>
-                                        <Input
-                                            value={editForm.city || ''}
-                                            onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
-                                            placeholder="City"
-                                            className="col-span-2"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label>Correction Reason</Label>
-                                <Input
-                                    placeholder="e.g. Typo in phone number"
-                                    value={editReason}
-                                    onChange={(e) => setEditReason(e.target.value)}
-                                />
-                            </div>
-
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <Label>Version History</Label>
-                                    <Button variant="link" size="sm" onClick={() => setShowHistory(!showHistory)}>
-                                        <History className="h-3 w-3 mr-1" /> {showHistory ? 'Hide' : 'Show'}
-                                    </Button>
-                                </div>
-                                {showHistory && (
-                                    <div className="rounded-md border bg-muted/50 p-3 space-y-3 max-h-40 overflow-y-auto text-xs">
-                                        {history.length === 0 ? (
-                                            <p className="text-muted-foreground text-center">No previous info</p>
-                                        ) : history.map((ver) => (
-                                            <div key={ver.id} className="border-b pb-2 last:border-0 last:pb-0">
-                                                <div className="flex justify-between font-medium">
-                                                    <span>{new Date(ver.changed_at).toLocaleString()}</span>
-                                                </div>
-                                                <p className="text-muted-foreground mt-1">{ver.reason}</p>
+                        {editingRecord && (
+                            <div className="grid grid-cols-1 lg:grid-cols-5 gap-16 py-6">
+                                <div className="lg:col-span-3 space-y-8">
+                                    <Form {...form}>
+                                        <form onSubmit={form.handleSubmit(handleSaveEdit)} className="space-y-6">
+                                            <div className="grid grid-cols-2 gap-6">
+                                                <FormField
+                                                    control={form.control}
+                                                    name="name"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Name</FormLabel>
+                                                            <FormControl>
+                                                                <Input {...field} className="h-10" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="phone"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Phone Number</FormLabel>
+                                                            <FormControl>
+                                                                <Input {...field} className="h-10 font-mono" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
 
-                    <SheetFooter>
-                        <Button variant="outline" onClick={() => setEditingRecord(null)}>Cancel</Button>
-                        <Button onClick={handleSaveEdit}>Save Changes</Button>
-                    </SheetFooter>
-                </SheetContent>
-            </Sheet>
+                                            <div className="grid grid-cols-2 gap-6">
+                                                <FormField
+                                                    control={form.control}
+                                                    name="date"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</FormLabel>
+                                                            <FormControl>
+                                                                <Input {...field} placeholder="YYYY-MM-DD" className="h-10" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="city"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">City/Location</FormLabel>
+                                                            <FormControl>
+                                                                <Input {...field} className="h-10" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                            </div>
+
+                                            <FormField
+                                                control={form.control}
+                                                name="reason"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Correction Reason</FormLabel>
+                                                        <FormControl>
+                                                            <Input {...field} placeholder="e.g. Typo in name or invalid digit in phone" className="h-10" />
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+
+                                            <div className="flex items-center gap-3 pt-4">
+                                                <Button type="submit" className="px-8 shadow-sm">Save Correction</Button>
+                                                <DrawerClose asChild>
+                                                    <Button variant="ghost" type="button" className="px-6">Cancel</Button>
+                                                </DrawerClose>
+                                            </div>
+                                        </form>
+                                    </Form>
+                                </div>
+
+                                <div className="lg:col-span-2 flex flex-col self-stretch min-h-[500px] lg:min-h-0 relative">
+                                    <div className="lg:absolute lg:inset-0 flex flex-col border rounded-xl bg-muted/20 overflow-hidden shadow-sm">
+                                        <div className="p-4 border-b bg-background/50">
+                                            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                                                <History className="h-4 w-4" /> Version History
+                                            </h3>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-4 space-y-0">
+                                            {!Array.isArray(history) || history.length === 0 ? (
+                                                <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                                                    <div className="h-10 w-10 bg-muted rounded-full flex items-center justify-center mb-2">
+                                                        <History className="h-5 w-5 text-muted-foreground/50" />
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground">No previous modifications tracked for this record.</p>
+                                                </div>
+                                            ) : [...history].map((ver, idx) => (
+                                                <div key={ver.id} className="group relative pl-6 pb-8 last:pb-2">
+                                                    {/* Timeline Line */}
+                                                    {idx !== history.length - 1 && (
+                                                        <div className="absolute left-[7px] top-[22px] bottom-0 w-[2px] bg-primary/20" />
+                                                    )}
+
+                                                    {/* Timeline Dot */}
+                                                    <div className="absolute left-0 top-1.5 h-4 w-4 rounded-full border-4 border-background bg-primary shadow-sm z-10" />
+
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] font-medium text-muted-foreground">
+                                                                {new Date(ver.changed_at).toLocaleString()}
+                                                            </span>
+                                                            <Badge variant="outline" className="text-[9px] h-4 px-1 bg-background opacity-70">
+                                                                rev {history.length - idx}
+                                                            </Badge>
+                                                        </div>
+                                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <Button
+                                                                variant="ghost" size="icon" className="h-6 w-6"
+                                                                onClick={() => {
+                                                                    setEditingVersionId(ver.id);
+                                                                    setTempReason(ver.reason);
+                                                                }}
+                                                            >
+                                                                <FileText className="h-3 w-3" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="h-6 w-6 hover:text-blue-600" onClick={() => setRollbackVersionId(ver.id)}>
+                                                                <RotateCcw className="h-3 w-3" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+
+                                                    {editingVersionId === ver.id ? (
+                                                        <div className="flex gap-2 items-center mb-2">
+                                                            <Input
+                                                                value={tempReason}
+                                                                onChange={e => setTempReason(e.target.value)}
+                                                                className="h-7 text-xs"
+                                                                autoFocus
+                                                            />
+                                                            <div className="flex shrink-0">
+                                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600" onClick={() => handleUpdateReason(ver.id)}>
+                                                                    <Check className="h-4 w-4" />
+                                                                </Button>
+                                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => setEditingVersionId(null)}>
+                                                                    <X className="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-[11px] text-muted-foreground leading-snug mb-2 font-normal">
+                                                            {ver.reason || "No reason provided"}
+                                                        </p>
+                                                    )}
+
+                                                    {renderDiff(ver.before, ver.after)}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </DrawerContent>
+            </Drawer>
+
+            <AlertDialog open={rollbackVersionId !== null} onOpenChange={(open) => !open && setRollbackVersionId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>确认还原此版本？</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            这将会把当前记录的数据覆盖为该历史版本的内容。此操作不可撤销（但你可以再次从历史记录中还原回来）。
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>取消</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => rollbackVersionId && handleRollback(rollbackVersionId)}>
+                            确认还原
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

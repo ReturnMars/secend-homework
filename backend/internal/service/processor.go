@@ -1,10 +1,12 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"etl-tool/internal/model"
@@ -256,8 +258,40 @@ func (s *CleanerService) UpdateRecord(id string, updates map[string]interface{},
 		return nil, err
 	}
 
-	// Snapshot before state (simple approach: just dump the struct)
-	beforeJSON := fmt.Sprintf("%+v", record) // In prod, use real JSON
+	// Change Detection: Check if updates actually change anything
+	hasChanges := false
+	for k, v := range updates {
+		// Simple comparison for basic types
+		currentVal := ""
+		switch k {
+		case "name":
+			currentVal = record.Name
+		case "phone":
+			currentVal = record.Phone
+		case "date":
+			currentVal = record.Date
+		case "city":
+			currentVal = record.City
+		case "province":
+			currentVal = record.Province
+		case "district":
+			currentVal = record.District
+		case "address":
+			currentVal = record.Address
+		}
+		if fmt.Sprintf("%v", v) != currentVal {
+			hasChanges = true
+			break
+		}
+	}
+
+	if !hasChanges {
+		return nil, fmt.Errorf("NO_CHANGES_DETECTED")
+	}
+
+	// Snapshot before state using JSON
+	beforeBytes, _ := json.Marshal(record)
+	beforeJSON := string(beforeBytes)
 
 	// Apply updates
 	if err := s.DB.Model(&record).Updates(updates).Error; err != nil {
@@ -266,7 +300,8 @@ func (s *CleanerService) UpdateRecord(id string, updates map[string]interface{},
 
 	// Refetch to get new state
 	s.DB.First(&record, "id = ?", id)
-	afterJSON := fmt.Sprintf("%+v", record)
+	afterBytes, _ := json.Marshal(record)
+	afterJSON := string(afterBytes)
 
 	// Create Version
 	version := model.RecordVersion{
@@ -281,9 +316,110 @@ func (s *CleanerService) UpdateRecord(id string, updates map[string]interface{},
 	return &record, nil
 }
 
+// UpdateVersionReason modifies only the reason for a specific version
+func (s *CleanerService) UpdateVersionReason(versionID string, newReason string) error {
+	return s.DB.Model(&model.RecordVersion{}).Where("id = ?", versionID).Update("reason", newReason).Error
+}
+
+// RollbackRecord restores a record to a target version's state
+func (s *CleanerService) RollbackRecord(recordID, versionID string) (*model.Record, error) {
+	var record model.Record
+	if err := s.DB.First(&record, "id = ?", recordID).Error; err != nil {
+		return nil, err
+	}
+
+	var version model.RecordVersion
+	if err := s.DB.First(&version, "id = ? AND record_id = ?", versionID, recordID).Error; err != nil {
+		return nil, fmt.Errorf("version not found")
+	}
+
+	// Snapshot current state before rollback
+	beforeBytes, _ := json.Marshal(record)
+	beforeJSON := string(beforeBytes)
+
+	// Parse the target state from the version's "After" field
+	targetData, err := s.smartUnmarshal(version.After)
+	if err != nil {
+		fmt.Printf("ROLLBACK_ERROR: Failed to unmarshal version %d. Content: %s\n", version.ID, version.After)
+		return nil, fmt.Errorf("failed to parse version data (ID: %d): %v", version.ID, err)
+	}
+
+	// Update the record fields. We only update data fields, keeping ID and BatchID.
+	updates := map[string]interface{}{
+		"name":          targetData["name"],
+		"phone":         targetData["phone"],
+		"date":          targetData["date"],
+		"province":      targetData["province"],
+		"city":          targetData["city"],
+		"district":      targetData["district"],
+		"status":        targetData["status"],
+		"error_message": targetData["error_message"],
+	}
+
+	// Clean updates: GORM needs correct types or it might fail if values are missing
+	for k, v := range updates {
+		if v == nil {
+			delete(updates, k)
+		}
+	}
+
+	if err := s.DB.Model(&record).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	// Refetch to confirm
+	s.DB.First(&record, "id = ?", recordID)
+	afterBytes, _ := json.Marshal(record)
+	afterJSON := string(afterBytes)
+
+	// Create a new version for the rollback action
+	rollbackVersion := model.RecordVersion{
+		RecordID:  record.ID,
+		Before:    beforeJSON,
+		After:     afterJSON,
+		ChangedAt: time.Now(),
+		Reason:    fmt.Sprintf("Rollback to Rev %d (Version ID: %s)", version.ID, versionID),
+	}
+	s.DB.Create(&rollbackVersion)
+
+	return &record, nil
+}
+
 // GetRecordHistory returns version history for a record
 func (s *CleanerService) GetRecordHistory(recordID string) ([]model.RecordVersion, error) {
 	var versions []model.RecordVersion
 	err := s.DB.Where("record_id = ?", recordID).Order("changed_at desc").Find(&versions).Error
 	return versions, err
+}
+
+// smartUnmarshal handles both JSON and legacy Go struct formatted data
+func (s *CleanerService) smartUnmarshal(data string) (map[string]interface{}, error) {
+	// Try standard JSON first
+	var res map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &res); err == nil {
+		return res, nil
+	}
+
+	// Fallback for Go struct format: {Key:Value, Key:Value}
+	// This happens if data was stored via fmt.Sprintf("%+v", struct)
+	res = make(map[string]interface{})
+	clean := strings.Trim(data, "{}")
+	if clean == "" {
+		return nil, fmt.Errorf("empty version data")
+	}
+
+	parts := strings.Split(clean, ",")
+	for _, part := range parts {
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) == 2 {
+			key := strings.ToLower(strings.TrimSpace(kv[0]))
+			val := strings.TrimSpace(kv[1])
+			res[key] = val
+		}
+	}
+
+	if len(res) == 0 {
+		return nil, fmt.Errorf("invalid data format")
+	}
+	return res, nil
 }

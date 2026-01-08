@@ -204,6 +204,20 @@ func (h *CsvHandler) UpdateRecord(c *gin.Context) {
 	c.JSON(http.StatusOK, record)
 }
 
+// RollbackRecord handles record rollback
+func (h *CsvHandler) RollbackRecord(c *gin.Context) {
+	id := c.Param("id")
+	versionID := c.Param("version_id")
+
+	record, err := h.Service.RollbackRecord(id, versionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, record)
+}
+
 // GetRecordHistory returns history for a record
 func (h *CsvHandler) GetRecordHistory(c *gin.Context) {
 	id := c.Param("id")
@@ -213,4 +227,23 @@ func (h *CsvHandler) GetRecordHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, history)
+}
+
+// UpdateVersionReason handles version reason update
+func (h *CsvHandler) UpdateVersionReason(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.Service.UpdateVersionReason(id, req.Reason); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Reason updated successfully"})
 }

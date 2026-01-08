@@ -34,6 +34,8 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 		api.GET("/batches", h.GetBatches)
 		api.PUT("/records/:id", h.UpdateRecord)
 		api.GET("/records/:id/history", h.GetRecordHistory)
+		api.POST("/records/:id/rollback/:version_id", h.RollbackRecord)
+		api.PATCH("/versions/:id/reason", h.UpdateVersionReason)
 		// Maintain legacy compatibility if needed, or just break it as planned.
 		// api.POST("/process-csv", ... ) -> Deprecated
 	}

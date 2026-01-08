@@ -3,6 +3,7 @@ import { Github, BookOpen, Command } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import BatchDetail from './components/BatchDetail';
 import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
 
 export interface ProcessStats {
   total_rows: number;
@@ -71,6 +72,7 @@ function App() {
             </div>
           </div>
         </footer>
+        <Toaster position="top-right" richColors />
       </div>
     </Router>
   );

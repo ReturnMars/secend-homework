@@ -21,7 +21,7 @@ func InitDB(dsn string) error {
 
 	// Auto Migrate
 	log.Println("Running Auto Migration...")
-	if err := DB.AutoMigrate(&model.ImportBatch{}, &model.Record{}); err != nil {
+	if err := DB.AutoMigrate(&model.ImportBatch{}, &model.Record{}, &model.RecordVersion{}); err != nil {
 		return fmt.Errorf("failed to auto migrate: %w", err)
 	}
 
