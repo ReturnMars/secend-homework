@@ -72,7 +72,7 @@ function App() {
             </div>
           </div>
         </footer>
-        <Toaster position="top-right" richColors />
+        <Toaster position="top-center" richColors />
       </div>
     </Router>
   );

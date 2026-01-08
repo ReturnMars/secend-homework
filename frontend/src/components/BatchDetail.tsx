@@ -456,14 +456,57 @@ export default function BatchDetail() {
             </Card>
 
             {/* Edit Drawer */}
-            <Drawer open={!!editingRecord} onOpenChange={(open) => !open && setEditingRecord(null)}>
+            <Drawer
+                open={!!editingRecord}
+                onOpenChange={(open) => !open && setEditingRecord(null)}
+                dismissible={false}
+            >
                 <DrawerContent>
+                    {/* Optimized Interactive Handle with Coordinated Variants */}
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-12 z-[60] flex items-center justify-center pointer-events-none">
+                        <motion.div
+                            initial="resting"
+                            whileHover="hover"
+                            className="pointer-events-auto h-full w-full flex items-center justify-center cursor-pointer"
+                        >
+                            <DrawerClose asChild>
+                                <motion.button
+                                    onClick={() => setEditingRecord(null)}
+                                    className="relative flex items-center justify-center backdrop-blur-md border border-zinc-500/10 shadow-sm overflow-hidden cursor-pointer"
+                                    variants={{
+                                        resting: { width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(113, 113, 122, 0.4)" },
+                                        hover: {
+                                            width: 28,
+                                            height: 28,
+                                            borderRadius: 14,
+                                            backgroundColor: "rgba(39, 39, 42, 0.95)", // zinc-800/95
+                                            borderColor: "rgba(39, 39, 42, 1)",
+                                        }
+                                    }}
+                                    transition={{ type: "spring", stiffness: 600, damping: 30, mass: 0.5 }}
+                                    title="Close Drawer"
+                                >
+                                    <motion.div
+                                        className="text-white flex items-center justify-center"
+                                        variants={{
+                                            resting: { opacity: 0, scale: 0, rotate: -90 },
+                                            hover: { opacity: 1, scale: 1, rotate: 0 }
+                                        }}
+                                        transition={{ duration: 0.1, ease: "easeOut" }}
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </motion.div>
+                                </motion.button>
+                            </DrawerClose>
+                        </motion.div>
+                    </div>
                     <div className="mx-auto w-full max-w-7xl px-8 pb-12">
-                        <DrawerHeader className="px-0 pt-10 pb-6">
+                        <DrawerHeader className="px-0 pt-10 pb-6 relative text-center">
                             <DrawerTitle className="text-3xl font-bold tracking-tight">Edit Record #{editingRecord?.row_index}</DrawerTitle>
                             <DrawerDescription className="text-sm">
                                 Manual correction for detected data issues. All changes are logged in version history.
                             </DrawerDescription>
+
                         </DrawerHeader>
 
                         {editingRecord && (
@@ -546,7 +589,14 @@ export default function BatchDetail() {
                                             <div className="flex items-center gap-3 pt-4">
                                                 <Button type="submit" className="px-8 shadow-sm">Save Correction</Button>
                                                 <DrawerClose asChild>
-                                                    <Button variant="ghost" type="button" className="px-6">Cancel</Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        type="button"
+                                                        className="px-6"
+                                                        onClick={() => setEditingRecord(null)}
+                                                    >
+                                                        Cancel
+                                                    </Button>
                                                 </DrawerClose>
                                             </div>
                                         </form>
