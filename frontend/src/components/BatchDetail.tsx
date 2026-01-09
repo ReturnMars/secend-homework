@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     CheckCircle, XCircle, AlertCircle, Download,
     Filter, ArrowLeft, History, RotateCcw,
@@ -347,10 +347,19 @@ export default function BatchDetail() {
             <Card className="pt-0 gap-0!">
                 <CardHeader className="p-2! pb-0!  border-b">
                     <Tabs value={filter} onValueChange={setFilter} >
-                        <TabsList>
-                            <TabsTrigger value="all">All Records</TabsTrigger>
-                            <TabsTrigger value="clean" className="data-[state=active]:text-green-700">Valid</TabsTrigger>
-                            <TabsTrigger value="error" className="data-[state=active]:text-red-700">Invalid</TabsTrigger>
+                        <TabsList className="gap-1">
+                            <TabsTrigger value="all" className="gap-2">
+                                <FileText className="h-3.5 w-3.5" />
+                                All Records
+                            </TabsTrigger>
+                            <TabsTrigger value="clean" className="data-[state=active]:text-green-700 gap-2">
+                                <CheckCircle className="h-3.5 w-3.5" />
+                                Valid
+                            </TabsTrigger>
+                            <TabsTrigger value="error" className="data-[state=active]:text-red-700 gap-2">
+                                <XCircle className="h-3.5 w-3.5" />
+                                Invalid
+                            </TabsTrigger>
                         </TabsList>
                     </Tabs>
                 </CardHeader>
@@ -366,49 +375,79 @@ export default function BatchDetail() {
                         <div className="col-span-2 text-right">Actions</div>
                     </div>
 
-                    <div className="divide-y divide-border/50">
-                        {loading ? (
-                            <div className="p-10 text-center text-muted-foreground">Loading records...</div>
-                        ) : records.map((record) => (
-                            <motion.div
-                                key={record.id}
-                                layoutId={`row-${record.id}`}
-                                className="grid grid-cols-12 gap-4 p-4 text-sm items-center hover:bg-muted/20 transition-colors"
-                            >
-                                <div className="col-span-1 text-muted-foreground font-mono">{record.row_index}</div>
-                                <div className="col-span-2 font-medium">{record.name}</div>
-                                <div className="col-span-2 font-mono text-muted-foreground">{record.phone}</div>
-                                <div className="col-span-2 truncate text-muted-foreground" title={`${record.province} ${record.city}`}>
-                                    {record.city || record.province || '-'}
-                                </div>
-                                <div className="col-span-3">
-                                    {record.status === 'Clean' ? (
-                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                            <CheckCircle className="mr-1 h-3 w-3" /> Valid
-                                        </Badge>
-                                    ) : (
-                                        <div className="flex flex-col gap-1">
-                                            <Badge variant="destructive" className="w-fit">
-                                                <XCircle className="mr-1 h-3 w-3" /> invalid
-                                            </Badge>
-                                            <span className="text-xs text-red-500 line-clamp-1" title={record.error_message}>
-                                                {record.error_message}
-                                            </span>
+                    <div className="divide-y divide-border/50 min-h-[580px] relative">
+                        <AnimatePresence mode="wait">
+                            {loading ? (
+                                <motion.div
+                                    key="loading"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-[1px] z-10"
+                                >
+                                    <div className="flex flex-col items-center gap-2">
+                                        <div className="h-8 w-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+                                        <p className="text-sm font-medium text-muted-foreground">Loading records...</p>
+                                    </div>
+                                </motion.div>
+                            ) : (
+                                <motion.div
+                                    key={`${filter}-${page}`}
+                                    initial={{ opacity: 0, x: 5 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -5 }}
+                                    transition={{ duration: 0.2, ease: "easeOut" }}
+                                    className="flex flex-col flex-1"
+                                >
+                                    {records.length === 0 ? (
+                                        <div className="p-20 text-center text-muted-foreground">
+                                            No records found for this filter.
                                         </div>
+                                    ) : (
+                                        records.map((record) => (
+                                            <motion.div
+                                                key={record.id}
+                                                layout
+                                                className="grid grid-cols-12 gap-4 p-4 text-sm items-center hover:bg-muted/20 transition-colors"
+                                            >
+                                                <div className="col-span-1 text-muted-foreground font-mono">{record.row_index}</div>
+                                                <div className="col-span-2 font-medium">{record.name}</div>
+                                                <div className="col-span-2 font-mono text-muted-foreground">{record.phone}</div>
+                                                <div className="col-span-2 truncate text-muted-foreground" title={`${record.province} ${record.city}`}>
+                                                    {record.city || record.province || '-'}
+                                                </div>
+                                                <div className="col-span-3">
+                                                    {record.status === 'Clean' ? (
+                                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                                            <CheckCircle className="mr-1 h-3 w-3" /> Valid
+                                                        </Badge>
+                                                    ) : (
+                                                        <div className="flex flex-col gap-1">
+                                                            <Badge variant="destructive" className="w-fit">
+                                                                <XCircle className="mr-1 h-3 w-3" /> invalid
+                                                            </Badge>
+                                                            <span className="text-xs text-red-500 line-clamp-1" title={record.error_message}>
+                                                                {record.error_message}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="col-span-2 flex justify-end">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-8 px-3 text-xs bg-background hover:bg-muted/50 border-border/60 shadow-xs transition-all flex items-center gap-1.5 font-medium"
+                                                        onClick={() => handleEditClick(record)}
+                                                    >
+                                                        Edit
+                                                    </Button>
+                                                </div>
+                                            </motion.div>
+                                        ))
                                     )}
-                                </div>
-                                <div className="col-span-2 flex justify-end">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 px-3 text-xs bg-background hover:bg-muted/50 border-border/60 shadow-xs transition-all flex items-center gap-1.5 font-medium"
-                                        onClick={() => handleEditClick(record)}
-                                    >
-                                        Edit
-                                    </Button>
-                                </div>
-                            </motion.div>
-                        ))}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
 
                     {/* Pagination */}

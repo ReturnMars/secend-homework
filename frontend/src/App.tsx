@@ -1,10 +1,24 @@
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { Github, BookOpen, Command } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import Dashboard from './components/Dashboard';
 import BatchDetail from './components/BatchDetail';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
+
+// 页面过渡配置
+const pageVariants = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
+};
+
+const pageTransition = {
+  type: "tween" as const,
+  ease: "anticipate" as const,
+  duration: 0.4
+};
 
 export interface ProcessStats {
   total_rows: number;
@@ -12,6 +26,41 @@ export interface ProcessStats {
   failed_rows: number;
   result_id: string;
   preview_data: Array<any>;
+}
+
+function AnimatedRoutes() {
+  const location = useLocation();
+
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        <Route
+          path="/"
+          element={
+            <motion.div
+              initial="initial" animate="animate" exit="exit"
+              variants={pageVariants} transition={pageTransition}
+              className="flex-1 flex flex-col"
+            >
+              <Dashboard />
+            </motion.div>
+          }
+        />
+        <Route
+          path="/batches/:id"
+          element={
+            <motion.div
+              initial="initial" animate="animate" exit="exit"
+              variants={pageVariants} transition={pageTransition}
+              className="flex-1 flex flex-col"
+            >
+              <BatchDetail />
+            </motion.div>
+          }
+        />
+      </Routes>
+    </AnimatePresence>
+  );
 }
 
 function App() {
@@ -51,12 +100,9 @@ function App() {
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col">
+        <main className="flex-1 flex flex-col relative overflow-hidden min-h-[calc(100vh-3.5rem)]">
           <ErrorBoundary>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/batches/:id" element={<BatchDetail />} />
-            </Routes>
+            <AnimatedRoutes />
           </ErrorBoundary>
         </main>
 
