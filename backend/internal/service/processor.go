@@ -77,10 +77,10 @@ func (s *CleanerService) processFile(batchID uint, filePath string) error {
 			return ""
 		}
 
-		rawName := getCol(indices.Name)
-		rawPhone := getCol(indices.Phone)
-		rawAddress := getCol(indices.Address)
-		rawDate := getCol(indices.Date)
+		rawName := strings.TrimSpace(getCol(indices.Name))
+		rawPhone := strings.TrimSpace(getCol(indices.Phone))
+		rawAddress := strings.TrimSpace(getCol(indices.Address))
+		rawDate := strings.TrimSpace(getCol(indices.Date))
 
 		rec := model.Record{
 			BatchID:  batchID,
