@@ -1,10 +1,8 @@
 package service
 
 import (
-	"bufio"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -40,7 +38,7 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 // processFileStream 使用流式迭代器处理文件以节省内存
 func (s *CleanerService) processFileStream(batchID uint, filePath string) error {
 	// 1. 估算总行数
-	totalLines, _ := countLines(filePath)
+	totalLines, _ := utils.CountLines(filePath)
 	if totalLines > 0 {
 		totalLines-- // 排除表头
 	}
@@ -175,23 +173,23 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 	rec := model.Record{
 		BatchID:  batchID,
 		RowIndex: rowIdx,
-		Name:     truncate(rawName, 255),
-		Address:  truncate(rawAddress, 255),
+		Name:     utils.Truncate(rawName, 255),
+		Address:  utils.Truncate(rawAddress, 255),
 	}
 
 	// 清洗手机号
 	cleanPhone, errPhone := CleanPhone(rawPhone)
-	rec.Phone = truncate(cleanPhone, 50)
+	rec.Phone = utils.Truncate(cleanPhone, 50)
 
 	// 清洗日期
 	cleanDate, errDate := CleanDate(rawDate)
-	rec.Date = truncate(cleanDate, 50)
+	rec.Date = utils.Truncate(cleanDate, 50)
 
 	// 提取地址信息
 	p, c, d := ExtractAddress(rawAddress)
-	rec.Province = truncate(p, 100)
-	rec.City = truncate(c, 100)
-	rec.District = truncate(d, 100)
+	rec.Province = utils.Truncate(p, 100)
+	rec.City = utils.Truncate(c, 100)
+	rec.District = utils.Truncate(d, 100)
 
 	// 验证状态
 	var errors []string
@@ -221,38 +219,4 @@ func (s *CleanerService) flushRecords(records *[]model.Record, batchID uint, pro
 	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 		Updates(map[string]interface{}{"processed_rows": processedRows})
 	return nil
-}
-
-// truncate 安全地截断字符串以适应数据库字段长度
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n])
-	}
-	return s
-}
-
-// countLines 高效地统计文件行数
-func countLines(path string) (int, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	r := bufio.NewReader(file)
-	count := 0
-	buf := make([]byte, 32*1024)
-	for {
-		c, err := r.Read(buf)
-		for i := 0; i < c; i++ {
-			if buf[i] == '\n' {
-				count++
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-	return count, nil
 }
