@@ -5,14 +5,26 @@ import (
 )
 
 // CreateBatch 创建一个新的导入批次记录
-func (s *CleanerService) CreateBatch(filename string, createdBy string) (*model.ImportBatch, error) {
+func (s *CleanerService) CreateBatch(filename string, createdBy string, hash string, path string) (*model.ImportBatch, error) {
 	batch := &model.ImportBatch{
 		OriginalFilename: filename,
+		FileHash:         hash,
+		FilePath:         path,
 		Status:           model.BatchStatusPending,
 		CreatedBy:        createdBy,
 	}
 	err := s.DB.Create(batch).Error
 	return batch, err
+}
+
+// FindBatchByHash 根据文件哈希查找已存在的批次
+func (s *CleanerService) FindBatchByHash(hash string) (*model.ImportBatch, error) {
+	var batch model.ImportBatch
+	err := s.DB.Where("file_hash = ? AND status = ?", hash, model.BatchStatusCompleted).Order("created_at desc").First(&batch).Error
+	if err != nil {
+		return nil, err
+	}
+	return &batch, nil
 }
 
 // GetBatch 根据 ID 获取批次信息

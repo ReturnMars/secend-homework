@@ -4,87 +4,73 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 )
-
-// Logic ported from old service/cleaner.go
 
 var (
-	phoneRegex = regexp.MustCompile(`\D`)
-	// Address Regex: Province/City/District
-	addressRegex = regexp.MustCompile(`(?P<province>[^省]+省|[^市]+市)(?P<city>[^市]+市|[^区]+区)?(?P<district>[^区]+区|[^县]+县)?`)
+	// regexPhone 匹配所有非数字字符，用于清理
+	regexPhone = regexp.MustCompile(`[^\d]`)
+	// regexAddress 提取省市区的启发式正则
+	regexAddress = regexp.MustCompile(`^([^省]+省|[^自治区]+自治区|[^市]+市)([^市]+市|[^州]+州|[^县]+县|[^盟]+盟)?([^区]+区|[^县]+县|[^旗]+旗)?`)
 )
 
-// CleanPhone removes non-digits and trims space
-func CleanPhone(input string) (string, error) {
-	input = strings.TrimSpace(input)
-	clean := phoneRegex.ReplaceAllString(input, "")
-	if len(clean) != 11 {
-		return input, fmt.Errorf("len!=11")
+// CleanPhone 尝试清洗并规范化手机号
+func CleanPhone(phone string) (string, error) {
+	if phone == "" {
+		return "", fmt.Errorf("empty phone")
 	}
-	if !strings.HasPrefix(clean, "1") {
-		return input, fmt.Errorf("not start with 1")
+
+	// 1. 移除所有空白和非数字字符
+	cleaned := regexPhone.ReplaceAllString(phone, "")
+
+	// 2. 处理常见的中国手机号前缀（+86 或 86）
+	if strings.HasPrefix(cleaned, "86") && len(cleaned) == 13 {
+		cleaned = cleaned[2:]
 	}
-	return clean, nil
+
+	// 3. 验证长度（中国标准 11 位）
+	if len(cleaned) != 11 {
+		return cleaned, fmt.Errorf("invalid length: %d (expected 11)", len(cleaned))
+	}
+
+	return cleaned, nil
 }
 
-func CleanDate(input string) (string, error) {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return "", fmt.Errorf("empty")
+// CleanDate 尝试将各种日期格式转换为标准 YYYY-MM-DD
+func CleanDate(dateStr string) (string, error) {
+	if dateStr == "" {
+		return "", fmt.Errorf("empty date")
 	}
 
-	// Normalize Chinese chars
-	normalized := input
-	normalized = strings.ReplaceAll(normalized, "年", "-")
-	normalized = strings.ReplaceAll(normalized, "月", "-")
-	normalized = strings.ReplaceAll(normalized, "日", "")
+	// 清理常见分隔符并统一使用短横线
+	d := strings.ReplaceAll(dateStr, "/", "-")
+	d = strings.ReplaceAll(d, ".", "-")
+	d = strings.TrimSpace(d)
 
-	layouts := []string{
-		"2006-01-02", "2006/1/2", "2006/01/02", "2006.1.2", "20060102",
-		"06-1-2", "2006-1-2",
+	// 检查是否符合 YYYY-MM-DD 这种最基本的形态
+	match, _ := regexp.MatchString(`^\d{4}-\d{1,2}-\d{1,2}$`, d)
+	if !match {
+		return d, fmt.Errorf("invalid format")
 	}
 
-	for _, layout := range layouts {
-		if t, err := time.Parse(layout, input); err == nil {
-			return t.Format("2006-01-02"), nil
-		}
-		if t, err := time.Parse(layout, normalized); err == nil {
-			return t.Format("2006-01-02"), nil
-		}
-	}
-	return input, fmt.Errorf("invalid format")
+	return d, nil
 }
 
-func ExtractAddress(fullAddress string) (string, string, string) {
-	fullAddress = strings.TrimSpace(fullAddress)
-	matches := addressRegex.FindStringSubmatch(fullAddress)
-	if len(matches) < 2 {
+// ExtractAddress 尝试从长地址字符串中分离出省、市、区/县
+func ExtractAddress(addr string) (province, city, district string) {
+	if addr == "" {
 		return "", "", ""
 	}
 
-	result := make(map[string]string)
-	for i, name := range addressRegex.SubexpNames() {
-		if i != 0 && name != "" && i < len(matches) {
-			result[name] = strings.TrimSpace(matches[i])
-		}
+	res := regexAddress.FindStringSubmatch(addr)
+	if len(res) >= 2 {
+		province = strings.TrimSpace(res[1])
+	}
+	if len(res) >= 3 {
+		city = strings.TrimSpace(res[2])
+	}
+	if len(res) >= 4 {
+		district = strings.TrimSpace(res[3])
 	}
 
-	p := result["province"]
-	c := result["city"]
-	d := result["district"]
-
-	// 特殊处理直辖市 (Beijing, Shanghai, Tianjin, Chongqing)
-	municipalities := map[string]bool{"北京市": true, "上海市": true, "天津市": true, "重庆市": true}
-	if municipalities[p] {
-		// 如果是直辖市且解析出的 city 为空或带有 "区/县"，将其顺移至 district
-		if strings.HasSuffix(c, "区") || strings.HasSuffix(c, "县") {
-			d = c
-			c = p // 城市名等于省份名
-		} else if c == "" {
-			c = p
-		}
-	}
-
-	return p, c, d
+	return province, city, district
 }

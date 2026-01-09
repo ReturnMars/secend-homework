@@ -23,13 +23,57 @@ func (s *CleanerService) GetRecords(batchID string, filter string, search string
 		query = query.Where("status != ?", "Clean")
 	}
 
-	if search != "" {
-		sPattern := "%" + search + "%"
-		query = query.Where("(name LIKE ? OR phone LIKE ? OR date LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ? OR error_message LIKE ?)",
-			sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern)
+	isSearch := search != ""
+	isNumeric := false
+	if isSearch {
+		isNumeric = true
+		for _, c := range search {
+			if c < '0' || c > '9' {
+				isNumeric = false
+				break
+			}
+		}
+
+		if isNumeric && len(search) >= 3 {
+			// 全数字优先走 phone 索引 (精准或右模糊)
+			query = query.Where("phone LIKE ?", search+"%")
+		} else {
+			// 否则走 name 索引，且只用右模糊以保持索引有效 (Index Range Scan)
+			query = query.Where("name LIKE ?", search+"%")
+		}
 	}
 
-	query.Count(&total)
+	// 核心加速：优化计数逻辑
+	if filter == "all" && !isSearch {
+		// 无过滤无搜索：直接查批次表，耗时 < 1ms
+		var batch model.ImportBatch
+		if err := s.DB.Select("total_rows").First(&batch, "id = ?", batchID).Error; err == nil {
+			total = int64(batch.TotalRows)
+		} else {
+			query.Count(&total)
+		}
+	} else {
+		// 搜索场景：如果页码是 1，采用“快速熔断计数”策略
+		if page == 1 && isSearch {
+			var count int64
+			var countErr error
+			if isNumeric && len(search) >= 3 {
+				countErr = s.DB.Raw("SELECT count(*) FROM (SELECT 1 FROM records WHERE batch_id = ? AND phone LIKE ? LIMIT 1001) AS t",
+					batchID, search+"%").Scan(&count).Error
+			} else {
+				countErr = s.DB.Raw("SELECT count(*) FROM (SELECT 1 FROM records WHERE batch_id = ? AND name LIKE ? LIMIT 1001) AS t",
+					batchID, search+"%").Scan(&count).Error
+			}
+
+			if countErr == nil {
+				total = count
+			} else {
+				query.Count(&total)
+			}
+		} else {
+			query.Count(&total)
+		}
+	}
 
 	offset := (page - 1) * pageSize
 	err := query.Offset(offset).Limit(pageSize).Order("row_index asc").Find(&records).Error

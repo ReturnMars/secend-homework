@@ -12,6 +12,9 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 	r := gin.Default()
 	r.SetTrustedProxies(nil)
 
+	// 设置上传文件的内存限制为 128MB，超出部分自动存入磁盘临时文件
+	r.MaxMultipartMemory = 128 << 20
+
 	// CORS Setup
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true

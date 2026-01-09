@@ -19,6 +19,8 @@ const (
 type ImportBatch struct {
 	ID               uint           `gorm:"primaryKey" json:"id"`
 	OriginalFilename string         `gorm:"size:255" json:"original_filename"`
+	FileHash         string         `gorm:"size:64;index" json:"file_hash"` // SHA256 hash
+	FilePath         string         `gorm:"size:500" json:"file_path"`
 	Status           BatchStatus    `gorm:"size:50;index;default:'Pending'" json:"status"`
 	TotalRows        int            `json:"total_rows"`
 	ProcessedRows    int            `json:"processed_rows"` // New field for progress tracking
@@ -29,18 +31,17 @@ type ImportBatch struct {
 	UpdatedAt        time.Time      `json:"updated_at"`
 	CompletedAt      *time.Time     `json:"completed_at"` // Pointer to allow null
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
+	Error            string         `gorm:"type:text" json:"error"` // 存储失败原因
 }
 
 // Record represents a single row from the CSV
 type Record struct {
-	ID       uint `gorm:"primaryKey" json:"id"`
-	BatchID  uint `gorm:"index;not null" json:"batch_id"`
-	RowIndex int  `json:"row_index"` // Original row number in CSV
-
-	// Data Fields
-	Name  string `gorm:"size:255" json:"name"`
-	Phone string `gorm:"size:50" json:"phone"`
-	Date  string `gorm:"size:50" json:"date"` // Storing normalized string, or could be time.Time
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	BatchID  uint   `gorm:"index:idx_batch_row" json:"batch_id"`
+	RowIndex int    `gorm:"index:idx_batch_row" json:"row_index"` // Original row number in CSV
+	Name     string `gorm:"size:255" json:"name"`
+	Phone    string `gorm:"size:50" json:"phone"`
+	Date     string `gorm:"size:50" json:"date"` // Storing normalized string, or could be time.Time
 
 	Address string `gorm:"size:255" json:"address"` // Original full address
 

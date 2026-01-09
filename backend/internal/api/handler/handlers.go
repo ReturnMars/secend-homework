@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,43 +29,111 @@ func NewCsvHandler(s *service.CleanerService) *CsvHandler {
 	return &CsvHandler{Service: s}
 }
 
-// Upload handles the CSV upload
+// Upload handles the CSV upload with streaming and de-duplication
 func (h *CsvHandler) Upload(c *gin.Context) {
-	file, err := c.FormFile("file")
+	mr, err := c.Request.MultipartReader()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		log.Printf("[Upload Error] Failed to get MultipartReader: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to initialize stream: " + err.Error()})
 		return
 	}
 
-	// Ensure upload dir exists
 	uploadDir := "uploads"
 	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
 		os.Mkdir(uploadDir, 0755)
 	}
 
-	// Save file with unique name
-	filename := fmt.Sprintf("%s_%s", uuid.New().String(), filepath.Base(file.Filename))
-	dst := filepath.Join(uploadDir, filename)
-	if err := c.SaveUploadedFile(file, dst); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+	var savedPath string
+	var originalName string
+	var fileHash string
+	var reused bool
+
+	// 遍历 multipart 部分
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("[Upload Error] NextPart error: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Stream break: " + err.Error()})
+			return
+		}
+
+		if part.FormName() == "file" {
+			originalName = part.FileName()
+			// 先存为临时文件以计算哈希
+			tempFilename := fmt.Sprintf("temp_%s_%d", uuid.New().String(), time.Now().UnixNano())
+			tempPath := filepath.Join(uploadDir, tempFilename)
+
+			dst, err := os.Create(tempPath)
+			if err != nil {
+				log.Printf("[Upload Error] Create temp file error: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Disk error: " + err.Error()})
+				return
+			}
+
+			// 同时计算哈希
+			hash := sha256.New()
+			mw := io.MultiWriter(dst, hash)
+
+			if _, err := io.Copy(mw, part); err != nil {
+				dst.Close()
+				os.Remove(tempPath)
+				log.Printf("[Upload Error] IO Copy error: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Upload interrupted: " + err.Error()})
+				return
+			}
+			dst.Close()
+
+			fileHash = hex.EncodeToString(hash.Sum(nil))
+
+			// 【临时关闭】哈希校验测试专用
+			/*
+				existing, _ := h.Service.FindBatchByHash(fileHash)
+				if existing != nil && existing.FilePath != "" {
+					os.Remove(tempPath)
+					savedPath = existing.FilePath
+					reused = true
+					log.Printf("[Upload] Duplicate file detected (Hash: %s), re-using: %s", fileHash, savedPath)
+				} else {
+			*/
+			// 否则存为永久文件 (UUID + OriginalExt)
+			ext := filepath.Ext(originalName)
+			permanentFilename := fmt.Sprintf("%s%s", uuid.New().String(), ext)
+			savedPath = filepath.Join(uploadDir, permanentFilename)
+
+			if err := os.Rename(tempPath, savedPath); err != nil {
+				log.Printf("[Upload Error] Rename error: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "File save error: " + err.Error()})
+				return
+			}
+			//} // 配合上述注释
+			break
+		}
+	}
+
+	if savedPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file field found in form"})
 		return
 	}
 
 	// Create Batch Record
 	username := c.GetString("username")
-	batch, err := h.Service.CreateBatch(file.Filename, username)
+	batch, err := h.Service.CreateBatch(originalName, username, fileHash, savedPath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create batch"})
 		return
 	}
 
 	// Trigger Async Processing
-	h.Service.ProcessFileAsync(batch.ID, dst)
+	h.Service.ProcessFileAsync(batch.ID, savedPath)
 
 	// Return Batch ID immediately
 	utils.SuccessResponse(c, gin.H{
 		"message":  "Upload successful, processing started",
 		"batch_id": batch.ID,
+		"reused":   reused,
 	})
 }
 
@@ -182,6 +253,7 @@ func (h *CsvHandler) StreamBatchProgress(c *gin.Context) {
 		}
 		data.Filters.Success = batch.SuccessCount
 		data.Filters.Failed = batch.FailureCount
+		data.Error = batch.Error
 
 		c.SSEvent("message", data)
 

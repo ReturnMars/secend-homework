@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"etl-tool/internal/model"
@@ -28,9 +30,13 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 	go func() {
 		err := s.processFileStream(batchID, filePath)
 		if err != nil {
-			log.Printf("Batch %d Failed: %v", batchID, err)
+			log.Printf("[Crucial] Batch %d Failed: %v", batchID, err)
+			// 将错误信息记录到数据库，以便前端展示
 			s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
-				Updates(map[string]interface{}{"status": model.BatchStatusFailed})
+				Updates(map[string]interface{}{
+					"status": model.BatchStatusFailed,
+					"error":  err.Error(),
+				})
 		}
 	}()
 }
@@ -38,10 +44,12 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 // processFileStream 使用流式迭代器处理文件以节省内存
 func (s *CleanerService) processFileStream(batchID uint, filePath string) error {
 	// 1. 估算总行数
+	startCount := time.Now()
 	totalLines, _ := utils.CountLines(filePath)
 	if totalLines > 0 {
 		totalLines-- // 排除表头
 	}
+	log.Printf("[Performance] CountLines took: %v for file: %s", time.Since(startCount), filePath)
 
 	// 2. 更新状态和总行数
 	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
@@ -80,8 +88,8 @@ func (s *CleanerService) processFileStream(batchID uint, filePath string) error 
 			"status":         model.BatchStatusCompleted,
 			"processed_rows": stats.rowIdx,
 			"total_rows":     stats.rowIdx,
-			"success_count":  stats.successCount,
-			"failure_count":  stats.failureCount,
+			"success_count":  stats.successRows,
+			"failure_count":  stats.failedRows,
 			"completed_at":   time.Now(),
 		}).Error
 }
@@ -106,54 +114,128 @@ func (s *CleanerService) readHeader(iter utils.RowIterator) ([]string, error) {
 
 // processStats 文件处理期间的统计信息
 type processStats struct {
-	rowIdx       int
-	successCount int
-	failureCount int
+	rowIdx      int
+	successRows int
+	failedRows  int
 }
 
-// processRows 遍历数据行并创建记录
+// processRows 采用高度并发的 Worker Pool 模式处理数据
 func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indices utils.ColIndices) (*processStats, error) {
-	var records []model.Record
+	const (
+		batchSize  = 2000 // 修正：Postgres 单条语句参数上限为 65535。13个字段 * 2000 = 26000，属于安全高效区间。
+		numWorkers = 8
+	)
+	// numWorkers := runtime.NumCPU() * 2 // Original line, replaced by constant
 	stats := &processStats{rowIdx: 1}
 
-	for iter.Next() {
-		stats.rowIdx++
-		row := iter.Row()
+	// 定义内部任务结构
+	type task struct {
+		row []string
+		idx int
+	}
 
-		if len(row) == 0 {
-			continue
-		}
+	// Channel 定义，设置缓冲区以控制内存占用
+	taskChan := make(chan task, batchSize)
+	resultChan := make(chan model.Record, batchSize)
+	errChan := make(chan error, 1)
 
-		rec := s.createRecordFromRow(row, batchID, stats.rowIdx, indices)
+	var wg sync.WaitGroup
+	var successCount int64
+	var failureCount int64
 
-		if rec.Status == "Clean" {
-			stats.successCount++
-		} else {
-			stats.failureCount++
-		}
+	// 1. 启动 Worker 池进行并行清洗 (CPU 密集型)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for t := range taskChan {
+				rec := s.createRecordFromRow(t.row, batchID, t.idx, indices)
+				if rec.Status == "Clean" {
+					atomic.AddInt64(&successCount, 1)
+				} else {
+					atomic.AddInt64(&failureCount, 1)
+				}
+				resultChan <- rec
+			}
+		}()
+	}
 
-		records = append(records, rec)
-
-		// 批量插入优化：每 1000 条记录写入一次
-		if len(records) >= 1000 {
-			if err := s.flushRecords(&records, batchID, stats.rowIdx); err != nil {
-				return nil, err
+	// 2. 启动数据持久化协程 (IO 密集型)
+	saveDone := make(chan struct{})
+	go func() {
+		defer close(saveDone)
+		var batch []model.Record
+		for rec := range resultChan {
+			batch = append(batch, rec)
+			if len(batch) >= batchSize {
+				if err := s.DB.CreateInBatches(batch, batchSize).Error; err != nil {
+					select {
+					case errChan <- err:
+					default:
+					}
+				}
+				// 调优：降低元数据更新频率。每 10000 行更新一次进度表，减少锁竞争。
+				currentProcessed := batch[len(batch)-1].RowIndex
+				if currentProcessed%10000 == 0 {
+					sCount := atomic.LoadInt64(&successCount)
+					fCount := atomic.LoadInt64(&failureCount)
+					go func(idx int, sc, fc int64) {
+						s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+							Updates(map[string]interface{}{
+								"processed_rows": idx,
+								"success_count":  int(sc),
+								"failure_count":  int(fc),
+							})
+					}(currentProcessed, sCount, fCount)
+				}
+				batch = nil
 			}
 		}
-	}
+		if len(batch) > 0 {
+			s.DB.CreateInBatches(batch, len(batch))
+		}
+	}()
 
-	if err := iter.Err(); err != nil {
-		return nil, err
-	}
+	// 3. 生产者：读取文件并分发任务
+	startTime := time.Now()
+	lastLogTime := time.Now()
+	var processErr error
+Loop:
+	for iter.Next() {
+		stats.rowIdx++
 
-	// 插入剩余记录
-	if len(records) > 0 {
-		if err := s.DB.Create(&records).Error; err != nil {
-			return nil, err
+		// 每 100 万行打印一次实时吞吐量
+		if stats.rowIdx%1000000 == 0 {
+			elapsed := time.Since(lastLogTime)
+			log.Printf("[Performance] Processed 1,000,000 rows, current speed: %.2f rows/sec", 1000000/elapsed.Seconds())
+			lastLogTime = time.Now()
+		}
+
+		select {
+		case err := <-errChan:
+			processErr = err
+			break Loop
+		case taskChan <- task{row: iter.Row(), idx: stats.rowIdx}:
 		}
 	}
 
-	return stats, nil
+	close(taskChan)   // 通知 Worker 停止
+	wg.Wait()         // 等待 Worker 完成计算
+	close(resultChan) // 通知 Saver 停止
+	<-saveDone        // 等待数据库写入完成
+
+	totalElapsed := time.Since(startTime)
+	log.Printf("[Performance] Total processing time (excluding CountLines): %v, Avg speed: %.2f rows/sec",
+		totalElapsed, float64(stats.rowIdx)/totalElapsed.Seconds())
+
+	if processErr == nil {
+		processErr = iter.Err()
+	}
+
+	stats.successRows = int(successCount)
+	stats.failedRows = int(failureCount)
+
+	return stats, processErr
 }
 
 // createRecordFromRow 从原始行数据创建 Record
@@ -208,15 +290,4 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 	}
 
 	return rec
-}
-
-// flushRecords 将记录写入数据库并更新进度
-func (s *CleanerService) flushRecords(records *[]model.Record, batchID uint, processedRows int) error {
-	if err := s.DB.Create(records).Error; err != nil {
-		return err
-	}
-	*records = nil
-	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
-		Updates(map[string]interface{}{"processed_rows": processedRows})
-	return nil
 }

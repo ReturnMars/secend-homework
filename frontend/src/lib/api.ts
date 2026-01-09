@@ -19,7 +19,7 @@ export async function apiRequest<T = any>(
   options: RequestOptions = {}
 ): Promise<T> {
   const token = localStorage.getItem("auth_token");
-  
+
   const headers: HeadersInit = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
@@ -31,11 +31,11 @@ export async function apiRequest<T = any>(
 
   // Handle FormData separately (don't set Content-Type)
   if (options.body instanceof FormData) {
-      delete (headers as any)["Content-Type"];
+    delete (headers as any)["Content-Type"];
   }
 
-  const url = endpoint.startsWith("http") 
-    ? endpoint 
+  const url = endpoint.startsWith("http")
+    ? endpoint
     : `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
   try {
@@ -60,14 +60,14 @@ export async function apiRequest<T = any>(
         // On login/register pages, just throw the error (show message to user)
         // On other pages, clear token and redirect
         const isAuthPage = window.location.pathname.includes("/login");
-        
+
         if (!isAuthPage) {
           // Clear invalid token
           localStorage.removeItem("auth_token");
           localStorage.removeItem("auth_user");
           window.location.href = "/login";
         }
-        
+
         // Throw with the actual backend error message
         throw new Error(errorMessage);
       }
@@ -79,24 +79,24 @@ export async function apiRequest<T = any>(
     if (response.status === 204) return {} as T;
 
     try {
-        const result = await response.json();
+      const result = await response.json();
 
-        // Unwrap standard response format {code, message, data, error}
-        if (result && typeof result === 'object' && 'code' in result) {
-            if (result.code === 200) {
-                // Success: return user data
-                return result.data as T;
-            } else {
-                // Business Logic Error (handled by backend util)
-                throw new Error(result.error || result.message || "Operation failed");
-            }
+      // Unwrap standard response format {code, message, data, error}
+      if (result && typeof result === 'object' && 'code' in result) {
+        if (result.code === 200) {
+          // Success: return user data
+          return result.data as T;
+        } else {
+          // Business Logic Error (handled by backend util)
+          throw new Error(result.error || result.message || "Operation failed");
         }
+      }
 
-        // Fallback for non-standard responses (should be rare now)
-        return result as T;
+      // Fallback for non-standard responses (should be rare now)
+      return result as T;
     } catch (err: any) {
-        // Rethrow logic error from above
-        throw err;
+      // Rethrow logic error from above
+      throw err;
     }
 
   } catch (error: any) {
@@ -110,54 +110,119 @@ export async function apiRequest<T = any>(
 // Convenience methods
 export const api = {
   get: <T>(url: string, options?: RequestOptions) => apiRequest<T>(url, { ...options, method: 'GET' }),
-  post: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, { 
-      ...options, 
-      method: 'POST', 
-      body: body instanceof FormData ? body : JSON.stringify(body) 
+  post: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, {
+    ...options,
+    method: 'POST',
+    body: body instanceof FormData ? body : JSON.stringify(body)
   }),
-  put: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, { 
-      ...options, 
-      method: 'PUT', 
-      body: JSON.stringify(body) 
+  put: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, {
+    ...options,
+    method: 'PUT',
+    body: JSON.stringify(body)
   }),
-  patch: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, { 
-      ...options, 
-      method: 'PATCH', 
-      body: JSON.stringify(body) 
+  patch: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, {
+    ...options,
+    method: 'PATCH',
+    body: JSON.stringify(body)
   }),
   delete: <T>(url: string, options?: RequestOptions) => apiRequest<T>(url, { ...options, method: 'DELETE' }),
+
+  /**
+   * Special method for file uploads with progress tracking
+   * Uses XMLHttpRequest because Fetch API doesn't support upload progress
+   */
+  upload: <T>(url: string, file: File, onProgress: (percent: number) => void): Promise<T> => {
+    console.log(`[API] Starting upload to: ${url}`, file.name);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const targetUrl = url.startsWith("http")
+        ? url
+        : `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+
+      console.log(`[API] XHR Target URL: ${targetUrl}`);
+      xhr.open("POST", targetUrl);
+
+      // Auth header
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      // Progress listener
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(percent);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const result = JSON.parse(xhr.responseText);
+            // Handle standard response unwrap
+            if (result && typeof result === 'object' && 'code' in result) {
+              if (result.code === 200) {
+                resolve(result.data as T);
+              } else {
+                reject(new Error(result.error || result.message || "Upload failed"));
+              }
+            } else {
+              resolve(result as T);
+            }
+          } catch (e) {
+            resolve(xhr.responseText as any);
+          }
+        } else {
+          try {
+            const errorData = JSON.parse(xhr.responseText);
+            reject(new Error(errorData.error || `HTTP ${xhr.status}`));
+          } catch {
+            reject(new Error(`HTTP ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Network error"));
+
+      const formData = new FormData();
+      formData.append("file", file);
+      xhr.send(formData);
+    });
+  },
+
   download: async (endpoint: string, _filename?: string) => {
     // New Strategy: Use One-time Download Token
     // This allows the browser to handle the download natively (streams to disk, no memory issues)
     // and correctly respects Content-Disposition filename from backend.
-    
-    try {
-        // 1. Get short-lived token
-        const { token } = await api.get<{ token: string }>("/auth/download-token");
-        
-        // 2. Construct URL with token
-        const baseUrl = endpoint.startsWith("http") 
-            ? endpoint 
-            : `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
-            
-        const separator = baseUrl.includes("?") ? "&" : "?";
-        const downloadUrl = `${baseUrl}${separator}token=${token}`;
-        
-        // 3. Trigger native download
-        // Creating an hidden iframe or link is cleaner than window.location for UX (doesn't replace history)
-        // But for file downloads, window.location is usually fine as it doesn't navigate away if it's an attachment.
-        // Let's use a temp link click to be safe.
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
 
-        return true;
+    try {
+      // 1. Get short-lived token
+      const { token } = await api.get<{ token: string }>("/auth/download-token");
+
+      // 2. Construct URL with token
+      const baseUrl = endpoint.startsWith("http")
+        ? endpoint
+        : `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+
+      const separator = baseUrl.includes("?") ? "&" : "?";
+      const downloadUrl = `${baseUrl}${separator}token=${token}`;
+
+      // 3. Trigger native download
+      // Creating an hidden iframe or link is cleaner than window.location for UX (doesn't replace history)
+      // But for file downloads, window.location is usually fine as it doesn't navigate away if it's an attachment.
+      // Let's use a temp link click to be safe.
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      return true;
     } catch (error) {
-        console.error("Download Init Failed:", error);
-        throw error;
+      console.error("Download Init Failed:", error);
+      throw error;
     }
   }
 };
