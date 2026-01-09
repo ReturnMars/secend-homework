@@ -44,26 +44,35 @@ export async function apiRequest<T = any>(
       headers,
     });
 
-    // Handle Auth Error
-    if (response.status === 401) {
-      // toast.error("Session expired. Please sign in again.");
-      // Optional: Clear token
-      // localStorage.removeItem("auth_token");
-      // Optional: Redirect
-      // window.location.href = "/login";
-      // Ensure we don't spam toasts or redirects, usually handled by AuthContext or MainLayout
-      throw new Error("Unauthorized");
-    }
-
+    // Handle errors
     if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-            const errorData = await response.json();
-            errorMessage = errorData.error || errorMessage;
-        } catch {
-            // Ignore JSON parse error for non-JSON error responses
+      // Try to extract error message from response body
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // Ignore JSON parse error for non-JSON error responses
+      }
+
+      // Special handling for 401 Unauthorized
+      if (response.status === 401) {
+        // On login/register pages, just throw the error (show message to user)
+        // On other pages, clear token and redirect
+        const isAuthPage = window.location.pathname.includes("/login");
+        
+        if (!isAuthPage) {
+          // Clear invalid token
+          localStorage.removeItem("auth_token");
+          localStorage.removeItem("auth_user");
+          window.location.href = "/login";
         }
+        
+        // Throw with the actual backend error message
         throw new Error(errorMessage);
+      }
+
+      throw new Error(errorMessage);
     }
 
     // Return empty for 204 or empty content
@@ -126,11 +135,16 @@ export const api = {
         if (!filename) {
              const disposition = response.headers.get('Content-Disposition');
              if (disposition && disposition.indexOf('attachment') !== -1) {
+                 // Expanded regex to handle filename* and filename
                  const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
                  const matches = filenameRegex.exec(disposition);
                  if (matches != null && matches[1]) { 
-                    finalFilename = matches[1].replace(/['"]/g, '');
-                    try { finalFilename = decodeURIComponent(finalFilename); } catch(e){}
+                    let raw = matches[1].replace(/['"]/g, '');
+                    // Handle RFC 5987 encoded filename
+                    if (raw.startsWith("UTF-8''")) {
+                        raw = raw.substring(7);
+                    }
+                    try { finalFilename = decodeURIComponent(raw); } catch(e){}
                  }
              }
         }

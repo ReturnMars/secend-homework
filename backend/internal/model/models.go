@@ -62,3 +62,11 @@ type RecordVersion struct {
 	ChangedAt time.Time `json:"changed_at"`
 	Reason    string    `gorm:"size:255" json:"reason"` // Manual correction reason
 }
+
+// User represents a system user (for auth)
+type User struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Username     string    `gorm:"size:100;uniqueIndex;not null" json:"username"`
+	PasswordHash string    `gorm:"size:255" json:"-"` // Allow null for migration safety
+	CreatedAt    time.Time `json:"created_at"`
+}

@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS record_versions;
+DROP TABLE IF EXISTS records;
+DROP TABLE IF EXISTS import_batches;
+DROP TABLE IF EXISTS users;

@@ -22,8 +22,18 @@ export function useBatchData(id: string | undefined) {
     }, [fetchBatchData]);
 
     const handleDownload = () => {
-        if (!id) return;
-        api.download(`/batches/${id}/export`)
+        if (!id || !batch) return;
+        
+        // Construct filename: replace .csv with .xlsx (backend always exports xlsx)
+        let filename = batch.original_filename;
+        if (filename.toLowerCase().endsWith('.csv')) {
+            filename = filename.slice(0, -4) + '.xlsx';
+        } else if (!filename.split('.').pop()?.includes('xls')) {
+            // Append xlsx if no efficient extension found
+            filename += '.xlsx';
+        }
+
+        api.download(`/batches/${id}/export`, filename)
            .catch(() => toast.error("Download failed"));
     };
 

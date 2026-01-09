@@ -17,10 +17,11 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 	config.AllowAllOrigins = true
 	config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	config.ExposeHeaders = []string{"Content-Length", "Content-Disposition", "Content-Description"}
 	r.Use(cors.New(config))
 
 	h := handler.NewCsvHandler(svc)
-	authHandler := handler.NewAuthHandler()
+	authHandler := handler.NewAuthHandler(svc.DB)
 
 	// API Routes
 	api := r.Group("/api")
