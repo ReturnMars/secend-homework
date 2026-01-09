@@ -1,12 +1,17 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  useLocation,
+} from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 
 // Layout & Pages
-import MainLayout from './layout/MainLayout';
-import Dashboard from './pages/Dashboard';
-import BatchDetail from './pages/BatchDetail';
-import History from './pages/History';
-import ErrorBoundary from './components/ErrorBoundary';
+import MainLayout from "./layout/MainLayout";
+import Dashboard from "./pages/Dashboard";
+import BatchDetail from "./pages/BatchDetail";
+import History from "./pages/History";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 // 页面过渡配置
 const pageVariants = {
@@ -18,7 +23,7 @@ const pageVariants = {
 const pageTransition = {
   type: "tween" as const,
   ease: "easeInOut" as const,
-  duration: 0.2
+  duration: 0.2,
 };
 
 function AnimatedRoutes() {
@@ -31,8 +36,11 @@ function AnimatedRoutes() {
           path="/"
           element={
             <motion.div
-              initial="initial" animate="animate" exit="exit"
-              variants={pageVariants} transition={pageTransition}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={pageVariants}
+              transition={pageTransition}
               className="flex-1 flex flex-col"
             >
               <Dashboard />
@@ -43,8 +51,11 @@ function AnimatedRoutes() {
           path="/batches/:id"
           element={
             <motion.div
-              initial="initial" animate="animate" exit="exit"
-              variants={pageVariants} transition={pageTransition}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={pageVariants}
+              transition={pageTransition}
               className="flex-1 flex flex-col"
             >
               <BatchDetail />
@@ -55,8 +66,11 @@ function AnimatedRoutes() {
           path="/history"
           element={
             <motion.div
-              initial="initial" animate="animate" exit="exit"
-              variants={pageVariants} transition={pageTransition}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={pageVariants}
+              transition={pageTransition}
               className="flex-1 flex flex-col"
             >
               <History />
