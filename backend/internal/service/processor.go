@@ -168,10 +168,11 @@ func (s *CleanerService) processFile(batchID uint, filePath string) error {
 	return nil
 }
 
-func (s *CleanerService) CreateBatch(filename string) (*model.ImportBatch, error) {
+func (s *CleanerService) CreateBatch(filename string, createdBy string) (*model.ImportBatch, error) {
 	batch := &model.ImportBatch{
 		OriginalFilename: filename,
 		Status:           model.BatchStatusPending,
+		CreatedBy:        createdBy,
 	}
 	err := s.DB.Create(batch).Error
 	return batch, err
@@ -269,10 +270,14 @@ func (s *CleanerService) ExportBatch(batchID string) (string, string, error) {
 	return filename, downloadName, nil
 }
 
-// GetBatches returns all import batches
-func (s *CleanerService) GetBatches() ([]model.ImportBatch, error) {
+// GetBatches returns all import batches, optionally filtering by user
+func (s *CleanerService) GetBatches(username string) ([]model.ImportBatch, error) {
 	var batches []model.ImportBatch
-	err := s.DB.Order("created_at desc").Find(&batches).Error
+	query := s.DB.Order("created_at desc")
+	if username != "" {
+		query = query.Where("created_by = ?", username)
+	}
+	err := query.Find(&batches).Error
 	return batches, err
 }
 

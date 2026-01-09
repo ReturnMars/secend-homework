@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState } from "react";
+import { api } from "../lib/api";
 
 interface User {
   username: string;
@@ -16,7 +17,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 从 localStorage 初始化状态，保持刷新不丢失登录态
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem("auth_token") === "mock-token";
+    return !!localStorage.getItem("auth_token");
   });
   const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem("auth_user");
@@ -28,17 +29,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Allow optional password for preserving interface but enforce it in logic
       const pwd = password || "admin123";
 
-      const res = await fetch("http://localhost:8080/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password: pwd }),
+      const data = await api.post<{ token: string; user: User }>("/login", {
+        username,
+        password: pwd,
       });
-
-      if (!res.ok) {
-        throw new Error("Login failed");
-      }
-
-      const data = await res.json();
 
       setIsAuthenticated(true);
       setUser(data.user);

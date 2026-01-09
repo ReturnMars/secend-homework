@@ -10,6 +10,7 @@ import clsx from "clsx";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
+import { api } from "../lib/api";
 
 export interface ProcessStats {
   total_rows: number;
@@ -89,17 +90,16 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
 
     try {
       // 1. Start Upload
-      const uploadRes = await fetch("http://localhost:8080/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+      // api wrapper handles FormData and Auth header automatically
+      const res = await api.post<{ batch_id: string }>("/upload", formData);
+      const { batch_id } = res;
 
-      if (!uploadRes.ok) throw new Error("Upload failed");
-      const { batch_id } = await uploadRes.json();
+      const token = localStorage.getItem("auth_token");
 
       // 2. Connect to SSE Stream
+      // EventSource doesn't support headers, so we pass token in query
       const evtSource = new EventSource(
-        `http://localhost:8080/api/batches/${batch_id}/progress`
+        `http://localhost:8080/api/batches/${batch_id}/progress?token=${token}`
       );
 
       evtSource.onmessage = (event) => {

@@ -47,7 +47,8 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 	}
 
 	// Create Batch Record
-	batch, err := h.Service.CreateBatch(file.Filename)
+	username := c.GetString("username")
+	batch, err := h.Service.CreateBatch(file.Filename, username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create batch"})
 		return
@@ -176,7 +177,8 @@ func (h *CsvHandler) StreamBatchProgress(c *gin.Context) {
 
 // GetBatches returns all batches
 func (h *CsvHandler) GetBatches(c *gin.Context) {
-	batches, err := h.Service.GetBatches()
+	username := c.GetString("username")
+	batches, err := h.Service.GetBatches(username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

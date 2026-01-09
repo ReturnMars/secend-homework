@@ -12,6 +12,8 @@ import (
 type AuthHandler struct {
 	// Simple in-memory user store for demo purposes
 	users map[string]string
+	// Token -> Username map
+	tokens map[string]string
 }
 
 func NewAuthHandler() *AuthHandler {
@@ -19,7 +21,14 @@ func NewAuthHandler() *AuthHandler {
 		users: map[string]string{
 			"admin": "admin123",
 		},
+		tokens: make(map[string]string),
 	}
+}
+
+// VerifyToken checks if a token is valid and returns the username
+func (h *AuthHandler) VerifyToken(token string) (string, bool) {
+	username, exists := h.tokens[token]
+	return username, exists
 }
 
 // Login handles user login
@@ -39,9 +48,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check against in-memory store
 	storedPwd, exists := h.users[req.Username]
 	if exists && storedPwd == req.Password {
-		fmt.Printf("[Auth] Login success for %s\n", req.Username)
+		token := "mock-secure-token-" + uuid.New().String()
+		h.tokens[token] = req.Username // Store token
+
+		fmt.Printf("[Auth] Login success for %s. Token: %s\n", req.Username, token)
 		c.JSON(http.StatusOK, gin.H{
-			"token": "mock-secure-token-" + uuid.New().String(),
+			"token": token,
 			"user": gin.H{
 				"username": req.Username,
 				"name":     req.Username, // Use username as name for simplicity

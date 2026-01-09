@@ -24,6 +24,7 @@ type ImportBatch struct {
 	ProcessedRows    int            `json:"processed_rows"` // New field for progress tracking
 	SuccessCount     int            `json:"success_count"`
 	FailureCount     int            `json:"failure_count"`
+	CreatedBy        string         `gorm:"size:100;index" json:"created_by"` // Username of uploader
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
 import {
   FileSpreadsheet,
   Plus,
@@ -37,10 +38,20 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch("http://localhost:8080/api/batches")
-      .then((res) => res.json())
-      .then((data) => setBatches(data || []))
-      .catch((err) => console.error(err));
+    // api wrapper automatically attaches token from localStorage
+    api
+      .get<Batch[]>("/batches")
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setBatches(data);
+        } else {
+          setBatches([]);
+        }
+      })
+      .catch((err) => {
+        console.error("Dashboard fetch error:", err);
+        setBatches([]);
+      });
   }, []);
 
   const handleUploadSuccess = (stats: any) => {

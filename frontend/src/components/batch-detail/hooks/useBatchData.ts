@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from "sonner";
+import { api } from "../../../lib/api";
 import type { Batch } from '../types';
 
 export function useBatchData(id: string | undefined) {
@@ -8,11 +9,11 @@ export function useBatchData(id: string | undefined) {
     const fetchBatchData = useCallback(async () => {
         if (!id) return;
         try {
-            const res = await fetch(`http://localhost:8080/api/batches/${id}`);
-            const data = await res.json();
+            const data = await api.get<Batch>(`/batches/${id}`);
             setBatch(data);
         } catch (err) {
             console.error(err);
+            // Optional: toast.error("Failed to load batch data");
         }
     }, [id]);
 
@@ -22,28 +23,20 @@ export function useBatchData(id: string | undefined) {
 
     const handleDownload = () => {
         if (!id) return;
-        window.location.href = `http://localhost:8080/api/batches/${id}/export`;
+        api.download(`/batches/${id}/export`)
+           .catch(() => toast.error("Download failed"));
     };
 
     const handleSaveBatchName = async (name: string) => {
         if (!id || !batch) return;
         try {
-            const res = await fetch(`http://localhost:8080/api/batches/${id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
-            });
-            if (res.ok) {
-                setBatch(prev => prev ? { ...prev, original_filename: name } : null);
-                toast.success("Batch renamed successfully");
-                return true;
-            } else {
-                toast.error("Failed to rename batch");
-                return false;
-            }
+            await api.patch(`/batches/${id}`, { name });
+            setBatch(prev => prev ? { ...prev, original_filename: name } : null);
+            toast.success("Batch renamed successfully");
+            return true;
         } catch (err) {
             console.error(err);
-            toast.error("Network error");
+            toast.error("Failed to rename batch");
             return false;
         }
     };

@@ -6,6 +6,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, ArrowRight, Command } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Button } from "@/components/ui/button";
+import { api } from "../lib/api";
 import {
   Form,
   FormControl,
@@ -49,17 +50,10 @@ export default function Login() {
     try {
       if (isRegistering) {
         // Register Logic
-        const res = await fetch("http://localhost:8080/api/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(values),
-        });
+        // Register Logic
+        await api.post("/register", values);
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Registration failed");
-        }
-
+        // Removed unnecessary manual error check as api throws on error
         setSuccess("Account created successfully! Signing in...");
 
         // Auto login after small delay

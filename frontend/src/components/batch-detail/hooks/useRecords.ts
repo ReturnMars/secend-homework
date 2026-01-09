@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { api } from "../../../lib/api";
 import type { Record } from '../types';
 
 export function useRecords(id: string | undefined) {
@@ -26,8 +27,7 @@ export function useRecords(id: string | undefined) {
         if (!id) return;
         setLoading(true);
         try {
-            const res = await fetch(`http://localhost:8080/api/batches/${id}/records?page=${page}&pageSize=${pageSize}&filter=${filter}&search=${encodeURIComponent(debouncedSearch)}`);
-            const data = await res.json();
+            const data = await api.get<{ data: Record[], total: number }>(`/batches/${id}/records?page=${page}&pageSize=${pageSize}&filter=${filter}&search=${encodeURIComponent(debouncedSearch)}`);
             setRecords(data.data || []);
             setTotal(data.total);
         } catch (err) {

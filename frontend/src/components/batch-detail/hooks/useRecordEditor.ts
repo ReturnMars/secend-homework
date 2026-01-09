@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { toast } from "sonner";
 import type { UseFormReturn } from "react-hook-form";
 import type { Record, RecordVersion } from '../types';
+import { api } from "../../../lib/api";
 
 export function useRecordEditor(
     form: UseFormReturn<any>,
@@ -16,8 +17,7 @@ export function useRecordEditor(
 
     const fetchHistory = useCallback(async (recordId: number) => {
         try {
-            const res = await fetch(`http://localhost:8080/api/records/${recordId}/history`);
-            const data = await res.json();
+            const data = await api.get<RecordVersion[]>(`/records/${recordId}/history`);
             setHistory(data || []);
         } catch (err) {
             console.error(err);
@@ -42,10 +42,8 @@ export function useRecordEditor(
     const handleSaveEdit = async (values: any) => {
         if (!editingRecord) return;
         try {
-            const res = await fetch(`http://localhost:8080/api/records/${editingRecord.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            // Note: api.put returns the data directly
+            const data = await api.put<{ error?: string }>(`/records/${editingRecord.id}`, {
                     updates: {
                         name: values.name,
                         phone: values.phone,
@@ -55,73 +53,62 @@ export function useRecordEditor(
                         district: values.district || "",
                     },
                     reason: values.reason
-                })
             });
-            const data = await res.json();
-            if (res.ok) {
+
+            // If we are here, it means success (api client throws on error)
+            // But check specifically if backend returned functional error inside 200/201 (though usually it throws)
+            // Wait, standard CRUD usually returns updated object or success message. 
+            // In case of success with 'NO_CHANGES_DETECTED', my api wrapper returns data.
+            // Let's assume standard behavior. If error logic is non-standard (e.g. 200 OK with error field), we handle it.
+            
+            if (data?.error === "NO_CHANGES_DETECTED") {
+                toast.info("No changes detected. Please modify a field or cancel.");
+            } else {
                 form.reset({ ...values, reason: "" });
                 refreshRecords();
                 refreshBatch();
                 fetchHistory(editingRecord.id);
                 toast.success("Correction saved successfully");
-            } else if (data.error === "NO_CHANGES_DETECTED") {
-                toast.info("No changes detected. Please modify a field or cancel.");
-            } else {
-                toast.error("Failed to update: " + (data.error || res.statusText));
             }
-        } catch (err) {
-            console.error(err);
-            toast.error("Network error");
+        } catch (err: any) {
+             console.error(err);
+             toast.error(err.message || "Failed to update record");
         }
     };
 
     const handleRollback = async (versionId: number) => {
         if (!editingRecord) return;
         try {
-            const res = await fetch(`http://localhost:8080/api/records/${editingRecord.id}/rollback/${versionId}`, {
-                method: 'POST'
+            const data = await api.post<Record>(`/records/${editingRecord.id}/rollback/${versionId}`);
+            
+            form.reset({
+                name: data.name,
+                phone: data.phone,
+                date: data.date,
+                province: data.province,
+                city: data.city,
+                district: data.district,
+                reason: "",
             });
-            const data = await res.json();
-            if (res.ok) {
-                form.reset({
-                    name: data.name,
-                    phone: data.phone,
-                    date: data.date,
-                    province: data.province,
-                    city: data.city,
-                    district: data.district,
-                    reason: "",
-                });
-                refreshRecords();
-                fetchHistory(editingRecord.id);
-                setRollbackVersionId(null);
-                toast.success("Rollback successful");
-            } else {
-                toast.error("Rollback failed: " + data.error);
-            }
-        } catch (err) {
+            refreshRecords();
+            fetchHistory(editingRecord.id);
+            setRollbackVersionId(null);
+            toast.success("Rollback successful");
+        } catch (err: any) {
             console.error(err);
-            toast.error("Network error");
+            toast.error(err.message || "Rollback failed");
         }
     };
 
     const handleUpdateReason = async (versionId: number) => {
         try {
-            const res = await fetch(`http://localhost:8080/api/versions/${versionId}/reason`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reason: tempReason })
-            });
-            if (res.ok) {
-                setEditingVersionId(null);
-                if (editingRecord) fetchHistory(editingRecord.id);
-                toast.success("Reason updated");
-            } else {
-                toast.error("Failed to update reason");
-            }
-        } catch (err) {
+            await api.patch(`/versions/${versionId}/reason`, { reason: tempReason });
+            setEditingVersionId(null);
+            if (editingRecord) fetchHistory(editingRecord.id);
+            toast.success("Reason updated");
+        } catch (err: any) {
             console.error(err);
-            toast.error("Network error");
+            toast.error(err.message || "Failed to update reason");
         }
     };
 
