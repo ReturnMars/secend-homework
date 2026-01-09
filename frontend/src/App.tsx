@@ -3,14 +3,19 @@ import {
   Routes,
   Route,
   useLocation,
+  Navigate,
 } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+
+// Context
+import { AuthProvider, useAuth } from "./context/AuthContext";
 
 // Layout & Pages
 import MainLayout from "./layout/MainLayout";
 import Dashboard from "./pages/Dashboard";
 import BatchDetail from "./pages/BatchDetail";
 import History from "./pages/History";
+import Login from "./pages/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 // 页面过渡配置
@@ -82,14 +87,37 @@ function AnimatedRoutes() {
   );
 }
 
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return children;
+}
+
 function App() {
   return (
     <Router>
-      <MainLayout>
-        <ErrorBoundary>
-          <AnimatedRoutes />
-        </ErrorBoundary>
-      </MainLayout>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <RequireAuth>
+                <MainLayout>
+                  <ErrorBoundary>
+                    <AnimatedRoutes />
+                  </ErrorBoundary>
+                </MainLayout>
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </AuthProvider>
     </Router>
   );
 }
