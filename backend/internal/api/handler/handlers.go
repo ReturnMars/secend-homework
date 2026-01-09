@@ -78,6 +78,7 @@ func (h *CsvHandler) GetBatchStatus(c *gin.Context) {
 func (h *CsvHandler) GetBatchRecords(c *gin.Context) {
 	id := c.Param("id")
 	filter := c.Query("filter") // all, clean, error
+	search := c.Query("search")
 
 	// Bind query params might fail if strictly typed, manual parse is safer for quick impl
 	// but let's assume default simple binding works or just stay simple
@@ -100,7 +101,7 @@ func (h *CsvHandler) GetBatchRecords(c *gin.Context) {
 		q.PageSize = 100
 	}
 
-	records, total, err := h.Service.GetRecords(id, filter, q.Page, q.PageSize)
+	records, total, err := h.Service.GetRecords(id, filter, search, q.Page, q.PageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -196,7 +196,9 @@ func (s *CleanerService) GetRecords(batchID string, filter string, search string
 	}
 
 	if search != "" {
-		query = query.Where("name LIKE ?", "%"+search+"%")
+		sPattern := "%" + search + "%"
+		query = query.Where("(name LIKE ? OR phone LIKE ? OR date LIKE ? OR address LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ? OR error_message LIKE ?)",
+			sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern, sPattern)
 	}
 
 	query.Count(&total)
