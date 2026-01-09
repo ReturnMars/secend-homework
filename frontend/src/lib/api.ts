@@ -79,12 +79,24 @@ export async function apiRequest<T = any>(
     if (response.status === 204) return {} as T;
 
     try {
-        return await response.json();
-    } catch {
-        // Return null/empty if response is not JSON (e.g. export download)
-        // But for exports we usually handle Blob separately. 
-        // This helper assumes JSON by default.
-        return {} as T;
+        const result = await response.json();
+
+        // Unwrap standard response format {code, message, data, error}
+        if (result && typeof result === 'object' && 'code' in result) {
+            if (result.code === 200) {
+                // Success: return user data
+                return result.data as T;
+            } else {
+                // Business Logic Error (handled by backend util)
+                throw new Error(result.error || result.message || "Operation failed");
+            }
+        }
+
+        // Fallback for non-standard responses (should be rare now)
+        return result as T;
+    } catch (err: any) {
+        // Rethrow logic error from above
+        throw err;
     }
 
   } catch (error: any) {
@@ -114,53 +126,37 @@ export const api = {
       body: JSON.stringify(body) 
   }),
   delete: <T>(url: string, options?: RequestOptions) => apiRequest<T>(url, { ...options, method: 'DELETE' }),
-  download: async (endpoint: string, filename?: string) => {
-    const token = localStorage.getItem("auth_token");
-    const headers: HeadersInit = {};
-    if (token) {
-      (headers as any)["Authorization"] = `Bearer ${token}`;
-    }
-     const url = endpoint.startsWith("http") 
-    ? endpoint 
-    : `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
-
+  download: async (endpoint: string, _filename?: string) => {
+    // New Strategy: Use One-time Download Token
+    // This allows the browser to handle the download natively (streams to disk, no memory issues)
+    // and correctly respects Content-Disposition filename from backend.
+    
     try {
-        const response = await fetch(url, { headers });
-        if (!response.ok) throw new Error("Download failed");
-
-        const blob = await response.blob();
+        // 1. Get short-lived token
+        const { token } = await api.get<{ token: string }>("/auth/download-token");
         
-        // Try to guess filename if not provided
-        let finalFilename = filename || "download";
-        if (!filename) {
-             const disposition = response.headers.get('Content-Disposition');
-             if (disposition && disposition.indexOf('attachment') !== -1) {
-                 // Expanded regex to handle filename* and filename
-                 const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                 const matches = filenameRegex.exec(disposition);
-                 if (matches != null && matches[1]) { 
-                    let raw = matches[1].replace(/['"]/g, '');
-                    // Handle RFC 5987 encoded filename
-                    if (raw.startsWith("UTF-8''")) {
-                        raw = raw.substring(7);
-                    }
-                    try { finalFilename = decodeURIComponent(raw); } catch(e){}
-                 }
-             }
-        }
-
-        const downloadUrl = window.URL.createObjectURL(blob);
+        // 2. Construct URL with token
+        const baseUrl = endpoint.startsWith("http") 
+            ? endpoint 
+            : `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+            
+        const separator = baseUrl.includes("?") ? "&" : "?";
+        const downloadUrl = `${baseUrl}${separator}token=${token}`;
+        
+        // 3. Trigger native download
+        // Creating an hidden iframe or link is cleaner than window.location for UX (doesn't replace history)
+        // But for file downloads, window.location is usually fine as it doesn't navigate away if it's an attachment.
+        // Let's use a temp link click to be safe.
         const a = document.createElement('a');
         a.href = downloadUrl;
-        a.download = finalFilename;
+        a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
-        a.remove();
-        window.URL.revokeObjectURL(downloadUrl);
-        
+        document.body.removeChild(a);
+
         return true;
     } catch (error) {
-        console.error("Download Error:", error);
+        console.error("Download Init Failed:", error);
         throw error;
     }
   }

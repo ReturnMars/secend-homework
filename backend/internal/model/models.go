@@ -27,6 +27,7 @@ type ImportBatch struct {
 	CreatedBy        string         `gorm:"size:100;index" json:"created_by"` // Username of uploader
 	CreatedAt        time.Time      `json:"created_at"`
 	UpdatedAt        time.Time      `json:"updated_at"`
+	CompletedAt      *time.Time     `json:"completed_at"` // Pointer to allow null
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
 }
 

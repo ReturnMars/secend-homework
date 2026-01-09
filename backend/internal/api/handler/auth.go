@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"etl-tool/internal/model"
+	"etl-tool/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -72,8 +73,14 @@ func hashPassword(password string) string {
 }
 
 // GenerateToken creates a new JWT token for a user
+// GenerateToken creates a new JWT token for a user with default 24h expiration
 func (h *AuthHandler) GenerateToken(username string) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour) // Token valid for 24 hours
+	return h.GenerateTokenWithDuration(username, 24*time.Hour)
+}
+
+// GenerateTokenWithDuration creates a JWT token with specific duration
+func (h *AuthHandler) GenerateTokenWithDuration(username string, duration time.Duration) (string, error) {
+	expirationTime := time.Now().Add(duration)
 
 	claims := &Claims{
 		Username: username,
@@ -86,6 +93,26 @@ func (h *AuthHandler) GenerateToken(username string) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(jwtSecret)
+}
+
+// GetDownloadToken returns a short-lived token (1 minute) for file downloads
+func (h *AuthHandler) GetDownloadToken(c *gin.Context) {
+	username := c.GetString("username")
+	if username == "" {
+		utils.ErrorResponse(c, http.StatusUnauthorized, "User context missing")
+		return
+	}
+
+	// 1 Minute Expiration
+	token, err := h.GenerateTokenWithDuration(username, 1*time.Minute)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to generate download token")
+		return
+	}
+
+	utils.SuccessResponse(c, gin.H{
+		"token": token,
+	})
 }
 
 // VerifyToken checks if a token is valid and returns the username
@@ -130,14 +157,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var user model.User
 	if err := h.db.Where("username = ?", req.Username).First(&user).Error; err != nil {
 		fmt.Printf("[Auth] Login failed: user not found %s\n", req.Username)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 
 	// Compare password hash
 	if user.PasswordHash != hashPassword(req.Password) {
 		fmt.Printf("[Auth] Login failed: wrong password for %s\n", req.Username)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 
@@ -145,12 +172,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	token, err := h.GenerateToken(req.Username)
 	if err != nil {
 		fmt.Printf("[Auth] Failed to generate token: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
 	fmt.Printf("[Auth] Login success for %s\n", req.Username)
-	c.JSON(http.StatusOK, gin.H{
+	utils.SuccessResponse(c, gin.H{
 		"token": token,
 		"user": gin.H{
 			"username": req.Username,
@@ -183,7 +210,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	var count int64
 	h.db.Model(&model.User{}).Where("username = ?", req.Username).Count(&count)
 	if count > 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+		utils.ErrorResponse(c, http.StatusConflict, "Username already exists")
 		return
 	}
 
@@ -194,12 +221,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		CreatedAt:    time.Now(),
 	}
 	if err := h.db.Create(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to create user")
 		return
 	}
 
 	fmt.Printf("[Auth] Registration success for %s\n", req.Username)
-	c.JSON(http.StatusOK, gin.H{
+	utils.SuccessResponse(c, gin.H{
 		"message": "Registration successful",
 		"user": gin.H{
 			"username": req.Username,

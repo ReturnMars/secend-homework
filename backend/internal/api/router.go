@@ -61,6 +61,7 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 		})
 
 		{
+			protected.GET("/auth/download-token", authHandler.GetDownloadToken)
 			protected.POST("/upload", h.Upload)
 			protected.GET("/batches", h.GetBatches)
 			protected.GET("/batches/:id", h.GetBatchStatus)

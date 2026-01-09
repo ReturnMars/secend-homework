@@ -1,476 +1,630 @@
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, History as HistoryIcon, FileText, RotateCcw, Check } from 'lucide-react';
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  X,
+  History as HistoryIcon,
+  FileText,
+  RotateCcw,
+  Check,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetDescription,
-    SheetClose,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetClose,
 } from "@/components/ui/sheet";
 import {
-    Form,
-    FormControl,
-    FormField,
-    FormItem,
-    FormLabel,
-    FormMessage,
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
 } from "@/components/ui/form";
 import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CalendarIcon } from 'lucide-react';
+import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
 } from "@/components/ui/popover";
 import type { UseFormReturn } from "react-hook-form";
-import type { Record, RecordVersion } from './types';
+import type { Record, RecordVersion } from "./types";
 
 interface EditRecordSheetProps {
-    editingRecord: Record | null;
-    setEditingRecord: (record: Record | null) => void;
-    form: UseFormReturn<any>;
-    handleSaveEdit: (values: any) => Promise<void>;
-    history: RecordVersion[];
-    editingVersionId: number | null;
-    setEditingVersionId: (id: number | null) => void;
-    tempReason: string;
-    setTempReason: (reason: string) => void;
-    handleUpdateReason: (versionId: number) => Promise<void>;
-    rollbackVersionId: number | null;
-    setRollbackVersionId: (id: number | null) => void;
-    handleRollback: (versionId: number) => Promise<void>;
+  editingRecord: Record | null;
+  setEditingRecord: (record: Record | null) => void;
+  form: UseFormReturn<any>;
+  handleSaveEdit: (values: any) => Promise<void>;
+  history: RecordVersion[];
+  editingVersionId: number | null;
+  setEditingVersionId: (id: number | null) => void;
+  tempReason: string;
+  setTempReason: (reason: string) => void;
+  handleUpdateReason: (versionId: number) => Promise<void>;
+  rollbackVersionId: number | null;
+  setRollbackVersionId: (id: number | null) => void;
+  handleRollback: (versionId: number) => Promise<void>;
 }
 
 export function EditRecordSheet({
-    editingRecord,
-    setEditingRecord,
-    form,
-    handleSaveEdit,
-    history,
-    editingVersionId,
-    setEditingVersionId,
-    tempReason,
-    setTempReason,
-    handleUpdateReason,
-    rollbackVersionId,
-    setRollbackVersionId,
-    handleRollback,
+  editingRecord,
+  setEditingRecord,
+  form,
+  handleSaveEdit,
+  history,
+  editingVersionId,
+  setEditingVersionId,
+  tempReason,
+  setTempReason,
+  handleUpdateReason,
+  rollbackVersionId,
+  setRollbackVersionId,
+  handleRollback,
 }: EditRecordSheetProps) {
+  const renderDiff = (before: string, after: string) => {
+    try {
+      const b = JSON.parse(before) as any;
+      const a = JSON.parse(after) as any;
+      const fieldMap: { [key: string]: string } = {
+        name: "name",
+        phone: "phone",
+        date: "date",
+        province: "province",
+        city: "city",
+        district: "district",
+      };
+      const changes = Object.entries(fieldMap).filter(
+        ([_, backendKey]) =>
+          String(b[backendKey] || "") !== String(a[backendKey] || "")
+      );
 
-    const renderDiff = (before: string, after: string) => {
-        try {
-            const b = JSON.parse(before) as any;
-            const a = JSON.parse(after) as any;
-            const fieldMap: { [key: string]: string } = {
-                'name': 'name',
-                'phone': 'phone',
-                'date': 'date',
-                'province': 'province',
-                'city': 'city',
-                'district': 'district'
-            };
-            const changes = Object.entries(fieldMap).filter(([_, backendKey]) => String(b[backendKey] || '') !== String(a[backendKey] || ''));
+      if (changes.length === 0) return null;
 
-            if (changes.length === 0) return null;
-
-            return (
-                <div className="mt-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800 font-mono text-[10px] leading-tight">
-                    {changes.map(([frontendKey, backendKey]) => (
-                        <div key={frontendKey} className="flex flex-col border-b border-slate-100 dark:border-slate-800 last:border-0">
-                            <div className="bg-red-50/70 dark:bg-red-950/30 text-red-700 dark:text-red-400 px-2 py-1 flex items-start gap-1">
-                                <span className="w-4 shrink-0 opacity-50">-</span>
-                                <span className="font-bold min-w-[45px] uppercase opacity-70">{frontendKey}:</span>
-                                <span className="break-all">{String(b[backendKey] || '(empty)')}</span>
-                            </div>
-                            <div className="bg-green-50/70 dark:bg-green-950/30 text-green-700 dark:text-green-400 px-2 py-1 flex items-start gap-1">
-                                <span className="w-4 shrink-0 opacity-50">+</span>
-                                <span className="font-bold min-w-[45px] uppercase opacity-70">{frontendKey}:</span>
-                                <span className="break-all font-semibold">{String(a[backendKey] || '(empty)')}</span>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            );
-        } catch (e) {
-            return null;
-        }
-    };
-
-    return (
-        <>
-            <Sheet
-                open={!!editingRecord}
-                onOpenChange={(open) => !open && setEditingRecord(null)}
+      return (
+        <div className="mt-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800 font-mono text-[10px] leading-tight">
+          {changes.map(([frontendKey, backendKey]) => (
+            <div
+              key={frontendKey}
+              className="flex flex-col border-b border-slate-100 dark:border-slate-800 last:border-0"
             >
-                <SheetContent
-                    side="bottom"
-                    className="p-0 overflow-hidden rounded-t-2xl border-t shadow-2xl transition-all duration-500 ease-in-out "
-                    onPointerDownOutside={(e) => e.preventDefault()}
+              <div className="bg-red-50/70 dark:bg-red-950/30 text-red-700 dark:text-red-400 px-2 py-1 flex items-start gap-1">
+                <span className="w-4 shrink-0 opacity-50">-</span>
+                <span className="font-bold min-w-[45px] uppercase opacity-70">
+                  {frontendKey}:
+                </span>
+                <span className="break-all">
+                  {String(b[backendKey] || "(empty)")}
+                </span>
+              </div>
+              <div className="bg-green-50/70 dark:bg-green-950/30 text-green-700 dark:text-green-400 px-2 py-1 flex items-start gap-1">
+                <span className="w-4 shrink-0 opacity-50">+</span>
+                <span className="font-bold min-w-[45px] uppercase opacity-70">
+                  {frontendKey}:
+                </span>
+                <span className="break-all font-semibold">
+                  {String(a[backendKey] || "(empty)")}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    } catch (e) {
+      return null;
+    }
+  };
+
+  return (
+    <>
+      <Sheet
+        open={!!editingRecord}
+        onOpenChange={(open) => !open && setEditingRecord(null)}
+      >
+        <SheetContent
+          side="bottom"
+          className="p-0 overflow-hidden rounded-t-2xl border-t shadow-2xl transition-all duration-500 ease-in-out "
+          onPointerDownOutside={(e) => e.preventDefault()}
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>Edit Record</SheetTitle>
+          </SheetHeader>
+
+          {/* Fixed Interactive Handle Style (Purely Visual) */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-12 z-60 flex items-center justify-center pointer-events-none">
+            <motion.div
+              initial="resting"
+              whileHover="hover"
+              className="pointer-events-auto h-full w-full flex items-center justify-center cursor-pointer"
+            >
+              <SheetClose asChild>
+                <motion.button
+                  onClick={() => setEditingRecord(null)}
+                  className="relative flex items-center justify-center backdrop-blur-md border border-zinc-500/10 shadow-sm overflow-hidden cursor-pointer"
+                  variants={{
+                    resting: {
+                      width: 36,
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: "rgba(113, 113, 122, 0.4)",
+                    },
+                    hover: {
+                      width: 28,
+                      height: 28,
+                      borderRadius: 14,
+                      backgroundColor: "rgba(39, 39, 42, 0.95)",
+                      borderColor: "rgba(39, 39, 42, 1)",
+                    },
+                  }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 600,
+                    damping: 30,
+                    mass: 0.5,
+                  }}
                 >
-                    <SheetHeader className="sr-only">
-                        <SheetTitle>Edit Record</SheetTitle>
-                    </SheetHeader>
+                  <motion.div
+                    variants={{
+                      resting: { opacity: 0, scale: 0.5, rotate: -45 },
+                      hover: { opacity: 1, scale: 1, rotate: 0 },
+                    }}
+                    transition={{ duration: 0.1, ease: "easeOut" }}
+                  >
+                    <X className="h-3.5 w-3.5 text-zinc-100" />
+                  </motion.div>
+                </motion.button>
+              </SheetClose>
+            </motion.div>
+          </div>
 
-                    {/* Fixed Interactive Handle Style (Purely Visual) */}
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-12 z-60 flex items-center justify-center pointer-events-none">
-                        <motion.div
-                            initial="resting"
-                            whileHover="hover"
-                            className="pointer-events-auto h-full w-full flex items-center justify-center cursor-pointer"
-                        >
-                            <SheetClose asChild>
-                                <motion.button
-                                    onClick={() => setEditingRecord(null)}
-                                    className="relative flex items-center justify-center backdrop-blur-md border border-zinc-500/10 shadow-sm overflow-hidden cursor-pointer"
-                                    variants={{
-                                        resting: { width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(113, 113, 122, 0.4)" },
-                                        hover: {
-                                            width: 28,
-                                            height: 28,
-                                            borderRadius: 14,
-                                            backgroundColor: "rgba(39, 39, 42, 0.95)",
-                                            borderColor: "rgba(39, 39, 42, 1)",
-                                        }
-                                    }}
-                                    transition={{ type: "spring", stiffness: 600, damping: 30, mass: 0.5 }}
-                                >
-                                    <motion.div
-                                        variants={{
-                                            resting: { opacity: 0, scale: 0.5, rotate: -45 },
-                                            hover: { opacity: 1, scale: 1, rotate: 0 }
-                                        }}
-                                        transition={{ duration: 0.1, ease: "easeOut" }}
-                                    >
-                                        <X className="h-3.5 w-3.5 text-zinc-100" />
-                                    </motion.div>
-                                </motion.button>
-                            </SheetClose>
-                        </motion.div>
-                    </div>
+          <div className="h-full overflow-y-auto px-2 pb-2 pt-8">
+            <div className="mx-auto w-full max-w-7xl">
+              <SheetHeader className="px-0 pb-6 relative text-center">
+                <SheetTitle className="text-3xl font-bold tracking-tight">
+                  Edit Record #{editingRecord?.row_index}
+                </SheetTitle>
+                <SheetDescription className="text-sm">
+                  Manual correction for detected data issues. All changes are
+                  logged in version history.
+                </SheetDescription>
+              </SheetHeader>
 
-                    <div className="h-full overflow-y-auto px-2 pb-2 pt-8">
-                        <div className="mx-auto w-full max-w-7xl">
-                            <SheetHeader className="px-0 pb-6 relative text-center">
-                                <SheetTitle className="text-3xl font-bold tracking-tight">Edit Record #{editingRecord?.row_index}</SheetTitle>
-                                <SheetDescription className="text-sm">
-                                    Manual correction for detected data issues. All changes are logged in version history.
-                                </SheetDescription>
-                            </SheetHeader>
-
-                            {editingRecord && (
-                                <div className="grid grid-cols-1 lg:grid-cols-5 gap-16 py-6 ">
-                                    <div className="lg:col-span-3 space-y-8">
-                                        <Form {...form}>
-                                            <form onSubmit={form.handleSubmit(handleSaveEdit)} className="space-y-6">
-                                                <div className="grid grid-cols-2 gap-6">
-                                                    <FormField
-                                                        control={form.control}
-                                                        name="name"
-                                                        render={({ field }) => (
-                                                            <FormItem className="space-y-2">
-                                                                <div className="flex items-center justify-between h-4">
-                                                                    <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Name</FormLabel>
-                                                                    <AnimatePresence>
-                                                                        {form.formState.errors.name && (
-                                                                            <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                                <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                            </motion.div>
-                                                                        )}
-                                                                    </AnimatePresence>
-                                                                </div>
-                                                                <FormControl>
-                                                                    <Input {...field} className="h-10" />
-                                                                </FormControl>
-                                                            </FormItem>
-                                                        )}
-                                                    />
-
-                                                    <FormField
-                                                        control={form.control}
-                                                        name="date"
-                                                        render={({ field }) => (
-                                                            <FormItem className="space-y-2 flex flex-col">
-                                                                <div className="flex items-center justify-between h-4">
-                                                                    <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</FormLabel>
-                                                                    <AnimatePresence>
-                                                                        {form.formState.errors.date && (
-                                                                            <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                                <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                            </motion.div>
-                                                                        )}
-                                                                    </AnimatePresence>
-                                                                </div>
-                                                                <Popover>
-                                                                    <PopoverTrigger asChild>
-                                                                        <FormControl>
-                                                                            <Button
-                                                                                variant={"outline"}
-                                                                                className={cn(
-                                                                                    "h-10 pl-3 text-left font-normal border-input hover:bg-background hover:text-foreground",
-                                                                                    !field.value && "text-muted-foreground"
-                                                                                )}
-                                                                            >
-                                                                                {field.value ? (
-                                                                                    format(new Date(field.value), "yyyy年MM月dd日")
-                                                                                ) : (
-                                                                                    <span>选择日期</span>
-                                                                                )}
-                                                                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                                            </Button>
-                                                                        </FormControl>
-                                                                    </PopoverTrigger>
-                                                                    <PopoverContent className="w-auto p-0" align="start">
-                                                                        <Calendar
-                                                                            mode="single"
-                                                                            selected={field.value ? new Date(field.value) : undefined}
-                                                                            onSelect={(date) => {
-                                                                                field.onChange(date ? format(date, "yyyy-MM-dd") : "");
-                                                                            }}
-                                                                            disabled={(date) =>
-                                                                                date > new Date() || date < new Date("1900-01-01")
-                                                                            }
-                                                                        />
-                                                                    </PopoverContent>
-                                                                </Popover>
-                                                            </FormItem>
-                                                        )}
-                                                    />
-                                                </div>
-
-                                                <FormField
-                                                    control={form.control}
-                                                    name="phone"
-                                                    render={({ field }) => (
-                                                        <FormItem className="space-y-2">
-                                                            <div className="flex items-center justify-between h-4">
-                                                                <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Phone Number</FormLabel>
-                                                                <AnimatePresence>
-                                                                    {form.formState.errors.phone && (
-                                                                        <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                            <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                        </motion.div>
-                                                                    )}
-                                                                </AnimatePresence>
-                                                            </div>
-                                                            <FormControl>
-                                                                <Input {...field} className="h-10 font-mono" />
-                                                            </FormControl>
-                                                        </FormItem>
-                                                    )}
-                                                />
-
-                                                <div className="grid grid-cols-3 gap-4">
-                                                    <FormField
-                                                        control={form.control}
-                                                        name="province"
-                                                        render={({ field }) => (
-                                                            <FormItem className="space-y-2">
-                                                                <div className="flex items-center justify-between h-4">
-                                                                    <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Province</FormLabel>
-                                                                    <AnimatePresence>
-                                                                        {form.formState.errors.province && (
-                                                                            <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                                <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                            </motion.div>
-                                                                        )}
-                                                                    </AnimatePresence>
-                                                                </div>
-                                                                <FormControl>
-                                                                    <Input {...field} className="h-10" />
-                                                                </FormControl>
-                                                            </FormItem>
-                                                        )}
-                                                    />
-                                                    <FormField
-                                                        control={form.control}
-                                                        name="city"
-                                                        render={({ field }) => (
-                                                            <FormItem className="space-y-2">
-                                                                <div className="flex items-center justify-between h-4">
-                                                                    <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">City</FormLabel>
-                                                                    <AnimatePresence>
-                                                                        {form.formState.errors.city && (
-                                                                            <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                                <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                            </motion.div>
-                                                                        )}
-                                                                    </AnimatePresence>
-                                                                </div>
-                                                                <FormControl>
-                                                                    <Input {...field} className="h-10" />
-                                                                </FormControl>
-                                                            </FormItem>
-                                                        )}
-                                                    />
-                                                    <FormField
-                                                        control={form.control}
-                                                        name="district"
-                                                        render={({ field }) => (
-                                                            <FormItem className="space-y-2">
-                                                                <div className="flex items-center justify-between h-4">
-                                                                    <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">District</FormLabel>
-                                                                    <AnimatePresence>
-                                                                        {form.formState.errors.district && (
-                                                                            <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                                <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                            </motion.div>
-                                                                        )}
-                                                                    </AnimatePresence>
-                                                                </div>
-                                                                <FormControl>
-                                                                    <Input {...field} className="h-10" />
-                                                                </FormControl>
-                                                            </FormItem>
-                                                        )}
-                                                    />
-                                                </div>
-
-                                                <FormField
-                                                    control={form.control}
-                                                    name="reason"
-                                                    render={({ field }) => (
-                                                        <FormItem className="space-y-2">
-                                                            <div className="flex items-center justify-between h-4">
-                                                                <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Correction Reason</FormLabel>
-                                                                <AnimatePresence>
-                                                                    {form.formState.errors.reason && (
-                                                                        <motion.div initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 4 }}>
-                                                                            <FormMessage className="text-[10px] m-0 leading-none" />
-                                                                        </motion.div>
-                                                                    )}
-                                                                </AnimatePresence>
-                                                            </div>
-                                                            <FormControl>
-                                                                <Input {...field} placeholder="e.g. Corrected name spelling or phone digit" className="h-10" />
-                                                            </FormControl>
-                                                        </FormItem>
-                                                    )}
-                                                />
-
-                                                <div className="pt-4 flex items-center justify-end gap-3">
-                                                    <SheetClose asChild>
-                                                        <Button variant="outline" type="button" onClick={() => setEditingRecord(null)}>Cancel</Button>
-                                                    </SheetClose>
-                                                    <Button type="submit" disabled={form.formState.isSubmitting} className="min-w-[120px]">
-                                                        {form.formState.isSubmitting ? "Saving..." : "Save Changes"}
-                                                    </Button>
-                                                </div>
-                                            </form>
-                                        </Form>
-                                    </div>
-
-                                    <div className="lg:col-span-2 flex flex-col self-stretch min-h-[500px] lg:min-h-0 relative">
-                                        <div className="lg:absolute lg:inset-0 flex flex-col border rounded-xl bg-muted/20 overflow-hidden shadow-sm">
-                                            <div className="p-4 border-b bg-background/50">
-                                                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                                                    <HistoryIcon className="h-4 w-4" /> Version History
-                                                </h3>
-                                            </div>
-                                            <div className="flex-1 overflow-y-auto p-4 space-y-0">
-                                                {!Array.isArray(history) || history.length === 0 ? (
-                                                    <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                                                        <div className="h-10 w-10 bg-muted rounded-full flex items-center justify-center mb-2">
-                                                            <HistoryIcon className="h-5 w-5 text-muted-foreground/50" />
-                                                        </div>
-                                                        <p className="text-xs text-muted-foreground">No previous modifications tracked for this record.</p>
-                                                    </div>
-                                                ) : [...history].map((ver, idx) => (
-                                                    <div key={ver.id} className="group relative pl-6 pb-8 last:pb-2">
-                                                        {idx !== history.length - 1 && (
-                                                            <div className="absolute left-[7px] top-[22px] bottom-0 w-[2px] bg-primary/20" />
-                                                        )}
-                                                        <div className="absolute left-0 top-1.5 h-4 w-4 rounded-full border-4 border-background bg-primary shadow-sm z-10" />
-                                                        <div className="flex justify-between items-center mb-2">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-[10px] font-medium text-muted-foreground">
-                                                                    {new Date(ver.changed_at).toLocaleString()}
-                                                                </span>
-                                                                <Badge variant="outline" className="text-[9px] h-4 px-1 bg-background opacity-70">
-                                                                    rev {history.length - idx}
-                                                                </Badge>
-                                                            </div>
-                                                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <Button
-                                                                    variant="ghost" size="icon" className="h-6 w-6"
-                                                                    onClick={() => {
-                                                                        setEditingVersionId(ver.id);
-                                                                        setTempReason(ver.reason);
-                                                                    }}
-                                                                >
-                                                                    <FileText className="h-3 w-3" />
-                                                                </Button>
-                                                                <Button variant="ghost" size="icon" className="h-6 w-6 hover:text-blue-600" onClick={() => setRollbackVersionId(ver.id)}>
-                                                                    <RotateCcw className="h-3 w-3" />
-                                                                </Button>
-                                                            </div>
-                                                        </div>
-                                                        {editingVersionId === ver.id ? (
-                                                            <div className="flex gap-2 items-center mb-2">
-                                                                <Input
-                                                                    value={tempReason}
-                                                                    onChange={e => setTempReason(e.target.value)}
-                                                                    className="h-7 text-xs"
-                                                                    autoFocus
-                                                                />
-                                                                <div className="flex shrink-0">
-                                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600" onClick={() => handleUpdateReason(ver.id)}>
-                                                                        <Check className="h-4 w-4" />
-                                                                    </Button>
-                                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => setEditingVersionId(null)}>
-                                                                        <X className="h-4 w-4" />
-                                                                    </Button>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <p className="text-[11px] text-muted-foreground leading-snug mb-2 font-normal">
-                                                                {ver.reason || "No reason provided"}
-                                                            </p>
-                                                        )}
-                                                        {renderDiff(ver.before, ver.after)}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
+              {editingRecord && (
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-16 py-6 ">
+                  <div className="lg:col-span-3 space-y-8">
+                    <Form {...form}>
+                      <form
+                        onSubmit={form.handleSubmit(handleSaveEdit)}
+                        className="space-y-6"
+                      >
+                        <div className="grid grid-cols-2 gap-6">
+                          <FormField
+                            control={form.control}
+                            name="name"
+                            render={({ field }) => (
+                              <FormItem className="space-y-2">
+                                <div className="flex items-center justify-between h-4">
+                                  <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Full Name
+                                  </FormLabel>
+                                  <AnimatePresence>
+                                    {form.formState.errors.name && (
+                                      <motion.div
+                                        initial={{ opacity: 0, x: 4 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        exit={{ opacity: 0, x: 4 }}
+                                      >
+                                        <FormMessage className="text-[10px] m-0 leading-none" />
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
                                 </div>
+                                <FormControl>
+                                  <Input {...field} className="h-10" />
+                                </FormControl>
+                              </FormItem>
                             )}
-                        </div>
-                    </div>
-                </SheetContent>
-            </Sheet>
+                          />
 
-            <AlertDialog open={rollbackVersionId !== null} onOpenChange={(open) => !open && setRollbackVersionId(null)}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>确认还原此版本？</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            这将会把当前记录的数据覆盖为该历史版本的内容。此操作不可撤销（但你可以再次从历史记录中还原回来）。
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>取消</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => rollbackVersionId && handleRollback(rollbackVersionId)}>
-                            确认还原
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
-        </>
-    );
+                          <FormField
+                            control={form.control}
+                            name="date"
+                            render={({ field }) => (
+                              <FormItem className="space-y-2 flex flex-col">
+                                <div className="flex items-center justify-between h-4">
+                                  <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Date
+                                  </FormLabel>
+                                  <AnimatePresence>
+                                    {form.formState.errors.date && (
+                                      <motion.div
+                                        initial={{ opacity: 0, x: 4 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        exit={{ opacity: 0, x: 4 }}
+                                      >
+                                        <FormMessage className="text-[10px] m-0 leading-none" />
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <FormControl>
+                                      <Button
+                                        variant={"outline"}
+                                        className={cn(
+                                          "h-10 pl-3 text-left font-normal border-input hover:bg-background hover:text-foreground",
+                                          !field.value &&
+                                            "text-muted-foreground"
+                                        )}
+                                      >
+                                        {field.value ? (
+                                          (() => {
+                                            const d = new Date(field.value);
+                                            return !isNaN(d.getTime()) ? (
+                                              format(d, "yyyy年MM月dd日")
+                                            ) : (
+                                              <span>
+                                                Invalid Date: {field.value}
+                                              </span>
+                                            );
+                                          })()
+                                        ) : (
+                                          <span>选择日期</span>
+                                        )}
+                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                      </Button>
+                                    </FormControl>
+                                  </PopoverTrigger>
+                                  <PopoverContent
+                                    className="w-auto p-0"
+                                    align="start"
+                                  >
+                                    <Calendar
+                                      mode="single"
+                                      selected={
+                                        field.value
+                                          ? new Date(field.value)
+                                          : undefined
+                                      }
+                                      onSelect={(date) => {
+                                        field.onChange(
+                                          date ? format(date, "yyyy-MM-dd") : ""
+                                        );
+                                      }}
+                                      disabled={(date) =>
+                                        date > new Date() ||
+                                        date < new Date("1900-01-01")
+                                      }
+                                    />
+                                  </PopoverContent>
+                                </Popover>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name="phone"
+                          render={({ field }) => (
+                            <FormItem className="space-y-2">
+                              <div className="flex items-center justify-between h-4">
+                                <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Phone Number
+                                </FormLabel>
+                                <AnimatePresence>
+                                  {form.formState.errors.phone && (
+                                    <motion.div
+                                      initial={{ opacity: 0, x: 4 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      exit={{ opacity: 0, x: 4 }}
+                                    >
+                                      <FormMessage className="text-[10px] m-0 leading-none" />
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                              <FormControl>
+                                <Input {...field} className="h-10 font-mono" />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className="grid grid-cols-3 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="province"
+                            render={({ field }) => (
+                              <FormItem className="space-y-2">
+                                <div className="flex items-center justify-between h-4">
+                                  <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Province
+                                  </FormLabel>
+                                  <AnimatePresence>
+                                    {form.formState.errors.province && (
+                                      <motion.div
+                                        initial={{ opacity: 0, x: 4 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        exit={{ opacity: 0, x: 4 }}
+                                      >
+                                        <FormMessage className="text-[10px] m-0 leading-none" />
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                                <FormControl>
+                                  <Input {...field} className="h-10" />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="city"
+                            render={({ field }) => (
+                              <FormItem className="space-y-2">
+                                <div className="flex items-center justify-between h-4">
+                                  <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    City
+                                  </FormLabel>
+                                  <AnimatePresence>
+                                    {form.formState.errors.city && (
+                                      <motion.div
+                                        initial={{ opacity: 0, x: 4 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        exit={{ opacity: 0, x: 4 }}
+                                      >
+                                        <FormMessage className="text-[10px] m-0 leading-none" />
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                                <FormControl>
+                                  <Input {...field} className="h-10" />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <FormField
+                            control={form.control}
+                            name="district"
+                            render={({ field }) => (
+                              <FormItem className="space-y-2">
+                                <div className="flex items-center justify-between h-4">
+                                  <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    District
+                                  </FormLabel>
+                                  <AnimatePresence>
+                                    {form.formState.errors.district && (
+                                      <motion.div
+                                        initial={{ opacity: 0, x: 4 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        exit={{ opacity: 0, x: 4 }}
+                                      >
+                                        <FormMessage className="text-[10px] m-0 leading-none" />
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                                <FormControl>
+                                  <Input {...field} className="h-10" />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name="reason"
+                          render={({ field }) => (
+                            <FormItem className="space-y-2">
+                              <div className="flex items-center justify-between h-4">
+                                <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Correction Reason
+                                </FormLabel>
+                                <AnimatePresence>
+                                  {form.formState.errors.reason && (
+                                    <motion.div
+                                      initial={{ opacity: 0, x: 4 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      exit={{ opacity: 0, x: 4 }}
+                                    >
+                                      <FormMessage className="text-[10px] m-0 leading-none" />
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  placeholder="e.g. Corrected name spelling or phone digit"
+                                  className="h-10"
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className="pt-4 flex items-center justify-end gap-3">
+                          <SheetClose asChild>
+                            <Button
+                              variant="outline"
+                              type="button"
+                              onClick={() => setEditingRecord(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </SheetClose>
+                          <Button
+                            type="submit"
+                            disabled={form.formState.isSubmitting}
+                            className="min-w-[120px]"
+                          >
+                            {form.formState.isSubmitting
+                              ? "Saving..."
+                              : "Save Changes"}
+                          </Button>
+                        </div>
+                      </form>
+                    </Form>
+                  </div>
+
+                  <div className="lg:col-span-2 flex flex-col self-stretch min-h-[500px] lg:min-h-0 relative">
+                    <div className="lg:absolute lg:inset-0 flex flex-col border rounded-xl bg-muted/20 overflow-hidden shadow-sm">
+                      <div className="p-4 border-b bg-background/50">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                          <HistoryIcon className="h-4 w-4" /> Version History
+                        </h3>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-4 space-y-0">
+                        {!Array.isArray(history) || history.length === 0 ? (
+                          <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                            <div className="h-10 w-10 bg-muted rounded-full flex items-center justify-center mb-2">
+                              <HistoryIcon className="h-5 w-5 text-muted-foreground/50" />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              No previous modifications tracked for this record.
+                            </p>
+                          </div>
+                        ) : (
+                          [...history].map((ver, idx) => (
+                            <div
+                              key={ver.id}
+                              className="group relative pl-6 pb-8 last:pb-2"
+                            >
+                              {idx !== history.length - 1 && (
+                                <div className="absolute left-[7px] top-[22px] bottom-0 w-[2px] bg-primary/20" />
+                              )}
+                              <div className="absolute left-0 top-1.5 h-4 w-4 rounded-full border-4 border-background bg-primary shadow-sm z-10" />
+                              <div className="flex justify-between items-center mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-medium text-muted-foreground">
+                                    {(() => {
+                                      const d = new Date(ver.changed_at);
+                                      return !isNaN(d.getTime())
+                                        ? d.toLocaleString()
+                                        : "Unknown Date";
+                                    })()}
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] h-4 px-1 bg-background opacity-70"
+                                  >
+                                    rev {history.length - idx}
+                                  </Badge>
+                                </div>
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={() => {
+                                      setEditingVersionId(ver.id);
+                                      setTempReason(ver.reason);
+                                    }}
+                                  >
+                                    <FileText className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 hover:text-blue-600"
+                                    onClick={() => setRollbackVersionId(ver.id)}
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              {editingVersionId === ver.id ? (
+                                <div className="flex gap-2 items-center mb-2">
+                                  <Input
+                                    value={tempReason}
+                                    onChange={(e) =>
+                                      setTempReason(e.target.value)
+                                    }
+                                    className="h-7 text-xs"
+                                    autoFocus
+                                  />
+                                  <div className="flex shrink-0">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-green-600"
+                                      onClick={() => handleUpdateReason(ver.id)}
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-red-500"
+                                      onClick={() => setEditingVersionId(null)}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-muted-foreground leading-snug mb-2 font-normal">
+                                  {ver.reason || "No reason provided"}
+                                </p>
+                              )}
+                              {renderDiff(ver.before, ver.after)}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog
+        open={rollbackVersionId !== null}
+        onOpenChange={(open) => !open && setRollbackVersionId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认还原此版本？</AlertDialogTitle>
+            <AlertDialogDescription>
+              这将会把当前记录的数据覆盖为该历史版本的内容。此操作不可撤销（但你可以再次从历史记录中还原回来）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                rollbackVersionId && handleRollback(rollbackVersionId)
+              }
+            >
+              确认还原
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
 }

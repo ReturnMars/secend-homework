@@ -1,0 +1,25 @@
+# Binaries
+main
+main.exe
+/bin
+/dist
+
+# Dependencies
+vendor/
+
+# Environment functions
+.env
+
+# Logs
+logs/
+*.log
+
+# Uploads & Test Data
+uploads/
+*.csv
+*.xlsx
+
+# Editor
+.vscode
+.idea
+*.swp

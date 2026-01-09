@@ -24,16 +24,8 @@ export function useBatchData(id: string | undefined) {
     const handleDownload = () => {
         if (!id || !batch) return;
         
-        // Construct filename: replace .csv with .xlsx (backend always exports xlsx)
-        let filename = batch.original_filename;
-        if (filename.toLowerCase().endsWith('.csv')) {
-            filename = filename.slice(0, -4) + '.xlsx';
-        } else if (!filename.split('.').pop()?.includes('xls')) {
-            // Append xlsx if no efficient extension found
-            filename += '.xlsx';
-        }
-
-        api.download(`/batches/${id}/export`, filename)
+        // Let backend decide the filename via Content-Disposition
+        api.download(`/batches/${id}/export`)
            .catch(() => toast.error("Download failed"));
     };
 

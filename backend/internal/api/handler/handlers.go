@@ -7,10 +7,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"etl-tool/internal/model"
 	"etl-tool/internal/service"
+	"etl-tool/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -58,7 +60,7 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 	h.Service.ProcessFileAsync(batch.ID, dst)
 
 	// Return Batch ID immediately
-	c.JSON(http.StatusOK, gin.H{
+	utils.SuccessResponse(c, gin.H{
 		"message":  "Upload successful, processing started",
 		"batch_id": batch.ID,
 	})
@@ -69,10 +71,10 @@ func (h *CsvHandler) GetBatchStatus(c *gin.Context) {
 	id := c.Param("id")
 	batch, err := h.Service.GetBatch(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Batch not found"})
+		utils.ErrorResponse(c, http.StatusNotFound, "Batch not found")
 		return
 	}
-	c.JSON(http.StatusOK, batch)
+	utils.SuccessResponse(c, batch)
 }
 
 // GetBatchRecords returns paginated records
@@ -104,11 +106,11 @@ func (h *CsvHandler) GetBatchRecords(c *gin.Context) {
 
 	records, total, err := h.Service.GetRecords(id, filter, search, q.Page, q.PageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	utils.SuccessResponse(c, gin.H{
 		"data":     records,
 		"total":    total,
 		"page":     q.Page,
@@ -119,15 +121,32 @@ func (h *CsvHandler) GetBatchRecords(c *gin.Context) {
 // ExportBatch downloads the processed CSV/Excel
 func (h *CsvHandler) ExportBatch(c *gin.Context) {
 	id := c.Param("id")
-	filePath, downloadName, err := h.Service.ExportBatch(id)
+
+	downloadName, err := h.Service.GetBatchFilename(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Force download with encoded filename
-	c.Header("Content-Description", "File Transfer")
+
+	// Detect format based on extension
+	isExcel := strings.HasSuffix(strings.ToLower(downloadName), ".xlsx")
+
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(downloadName)))
-	c.File(filePath)
+	c.Header("Transfer-Encoding", "chunked")
+
+	if isExcel {
+		// Excel Streaming
+		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		if err := h.Service.ExportBatchWithExcelStream(id, c.Writer); err != nil {
+			fmt.Printf("Export excel stream failed: %v\n", err)
+		}
+	} else {
+		// CSV Streaming (Default)
+		c.Header("Content-Type", "text/csv; charset=utf-8")
+		if err := h.Service.ExportBatchStream(id, c.Writer); err != nil {
+			fmt.Printf("Export csv stream failed: %v\n", err)
+		}
+	}
 }
 
 // StreamBatchProgress streams progress updates via SSE
@@ -180,10 +199,10 @@ func (h *CsvHandler) GetBatches(c *gin.Context) {
 	username := c.GetString("username")
 	batches, err := h.Service.GetBatches(username)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, batches)
+	utils.SuccessResponse(c, batches)
 }
 
 // UpdateRecord handles manual corrections
@@ -201,11 +220,10 @@ func (h *CsvHandler) UpdateRecord(c *gin.Context) {
 
 	record, err := h.Service.UpdateRecord(id, req.Updates, req.Reason)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	c.JSON(http.StatusOK, record)
+	utils.SuccessResponse(c, record)
 }
 
 // RollbackRecord handles record rollback
@@ -215,11 +233,10 @@ func (h *CsvHandler) RollbackRecord(c *gin.Context) {
 
 	record, err := h.Service.RollbackRecord(id, versionID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	c.JSON(http.StatusOK, record)
+	utils.SuccessResponse(c, record)
 }
 
 // GetRecordHistory returns history for a record
@@ -227,10 +244,14 @@ func (h *CsvHandler) GetRecordHistory(c *gin.Context) {
 	id := c.Param("id")
 	history, err := h.Service.GetRecordHistory(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, history)
+	// Explicitly handle nil slice to return empty array
+	if history == nil {
+		history = []model.RecordVersion{}
+	}
+	utils.SuccessResponse(c, history)
 }
 
 // UpdateVersionReason handles version reason update
@@ -245,11 +266,10 @@ func (h *CsvHandler) UpdateVersionReason(c *gin.Context) {
 	}
 
 	if err := h.Service.UpdateVersionReason(id, req.Reason); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Reason updated successfully"})
+	utils.SuccessResponse(c, gin.H{"message": "Reason updated successfully"})
 }
 
 // UpdateBatch handles updating batch metadata (like filename)
@@ -264,9 +284,8 @@ func (h *CsvHandler) UpdateBatch(c *gin.Context) {
 	}
 
 	if err := h.Service.UpdateBatchName(id, req.Name); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Batch updated successfully"})
+	utils.SuccessResponse(c, gin.H{"message": "Batch updated successfully"})
 }

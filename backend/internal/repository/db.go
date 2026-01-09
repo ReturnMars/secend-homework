@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"etl-tool/internal/model"
 	"fmt"
 	"log"
 
@@ -27,6 +28,12 @@ func InitDB(dsn string) error {
 	log.Println("Running Database Migrations...")
 	if err := runMigrations(dsn); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// Hotfix: Ensure Updated schema is applied using AutoMigrate for development
+	// This fixes issues where golang-migrate might lag behind model changes
+	if err := DB.AutoMigrate(&model.ImportBatch{}); err != nil {
+		log.Printf("AutoMigrate Warning: %v", err)
 	}
 
 	log.Println("Database initialized and migrated successfully.")

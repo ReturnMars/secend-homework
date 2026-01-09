@@ -1,11 +1,14 @@
 package service
 
 import (
+	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"path/filepath"
+
 	"strings"
 	"time"
 
@@ -33,13 +36,181 @@ func (s *CleanerService) UpdateBatchName(id string, newName string) error {
 // ProcessFileAsync starts a goroutine to process the file
 func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 	go func() {
-		err := s.processFile(batchID, filePath)
+		err := s.processFileStream(batchID, filePath)
 		if err != nil {
 			log.Printf("Batch %d Failed: %v", batchID, err)
 			s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 				Updates(map[string]interface{}{"status": model.BatchStatusFailed})
 		}
 	}()
+}
+
+// Helper to safely truncate strings to fit DB columns
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
+func countLines(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	r := bufio.NewReader(file)
+	count := 0
+	buf := make([]byte, 32*1024)
+	for {
+		c, err := r.Read(buf)
+		for i := 0; i < c; i++ {
+			if buf[i] == '\n' {
+				count++
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return count, nil
+}
+
+// processFileStream processes the file using a stream iterator to save memory
+func (s *CleanerService) processFileStream(batchID uint, filePath string) error {
+	// 1. Estimate Total Rows
+	totalLines, _ := countLines(filePath)
+	if totalLines > 0 {
+		totalLines-- // exclude header approximation
+	}
+
+	// 2. Update Status and Total Rows
+	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+		Updates(map[string]interface{}{
+			"status":     model.BatchStatusProcessing,
+			"total_rows": totalLines,
+		})
+
+	// 3. Open File Stream
+	iter, err := utils.NewRowIterator(filePath)
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+
+	// 3. Read Header
+	if !iter.Next() {
+		if err := iter.Err(); err != nil {
+			log.Printf("DEBUG: Header read error: %v", err)
+			return err
+		}
+		return fmt.Errorf("file is empty or missing header")
+	}
+	header := iter.Row()
+
+	if len(header) > 0 {
+		header[0] = strings.TrimPrefix(header[0], "\xEF\xBB\xBF")
+	}
+
+	indices := utils.DetectHeaders(header)
+
+	if indices.Phone == -1 && indices.Name == -1 {
+		return fmt.Errorf("could not detect required columns (Name/Phone). Header was: %v", header)
+	}
+
+	var records []model.Record
+	successCount := 0
+	failureCount := 0
+	rowIdx := 1 // Start at 1 because we consumed header
+
+	// 4. Iterate & Clean
+	for iter.Next() {
+		rowIdx++
+		row := iter.Row()
+
+		if len(row) == 0 {
+			continue
+		}
+
+		getCol := func(idx int) string {
+			if idx >= 0 && idx < len(row) {
+				return row[idx]
+			}
+			return ""
+		}
+
+		rawName := strings.TrimSpace(getCol(indices.Name))
+		rawPhone := strings.TrimSpace(getCol(indices.Phone))
+		rawAddress := strings.TrimSpace(getCol(indices.Address))
+		rawDate := strings.TrimSpace(getCol(indices.Date))
+
+		rec := model.Record{
+			BatchID:  batchID,
+			RowIndex: rowIdx,
+			Name:     truncate(rawName, 255),
+			Address:  truncate(rawAddress, 255),
+		}
+
+		cleanPhone, errPhone := CleanPhone(rawPhone)
+		rec.Phone = truncate(cleanPhone, 50)
+		cleanDate, errDate := CleanDate(rawDate)
+		rec.Date = truncate(cleanDate, 50)
+
+		p, c, d := ExtractAddress(rawAddress)
+		rec.Province = truncate(p, 100)
+		rec.City = truncate(c, 100)
+		rec.District = truncate(d, 100)
+
+		var errors []string
+		if errPhone != nil {
+			errors = append(errors, fmt.Sprintf("Phone: %v", errPhone))
+		}
+		if errDate != nil {
+			errors = append(errors, fmt.Sprintf("Date: %v", errDate))
+		}
+
+		if len(errors) > 0 {
+			rec.Status = "Error"
+			rec.ErrorMessage = fmt.Sprintf("%v", errors)
+			failureCount++
+		} else {
+			rec.Status = "Clean"
+			successCount++
+		}
+
+		records = append(records, rec)
+
+		if len(records) >= 1000 {
+			if err := s.DB.Create(&records).Error; err != nil {
+				return err
+			}
+			records = nil
+			s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+				Updates(map[string]interface{}{"processed_rows": rowIdx})
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return err
+	}
+
+	if len(records) > 0 {
+		if err := s.DB.Create(&records).Error; err != nil {
+			return err
+		}
+	}
+
+	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+		Updates(map[string]interface{}{
+			"status":         model.BatchStatusCompleted,
+			"processed_rows": rowIdx,
+			"total_rows":     rowIdx,
+			"success_count":  successCount,
+			"failure_count":  failureCount,
+			"completed_at":   time.Now(),
+		}).Error
 }
 
 func (s *CleanerService) processFile(batchID uint, filePath string) error {
@@ -210,64 +381,145 @@ func (s *CleanerService) GetRecords(batchID string, filter string, search string
 	return records, total, err
 }
 
-// ExportBatch generates an Excel file for the batch
-func (s *CleanerService) ExportBatch(batchID string) (string, string, error) {
+// GetBatchFilename returns the download filename for a batch
+func (s *CleanerService) GetBatchFilename(batchID string) (string, error) {
 	var batch model.ImportBatch
 	if err := s.DB.First(&batch, "id = ?", batchID).Error; err != nil {
-		return "", "", err
+		return "", err
 	}
 
-	var records []model.Record
-	if err := s.DB.Where("batch_id = ?", batchID).Order("row_index asc").Find(&records).Error; err != nil {
-		return "", "", err
+	// Return original filename (handler decides format based on extension)
+	return batch.OriginalFilename, nil
+}
+
+// ExportBatchStream streams the batch data as CSV to the provided writer
+func (s *CleanerService) ExportBatchStream(batchID string, w io.Writer) error {
+	// 1. Write BOM check (for Excel UTF-8 compatibility)
+	w.Write([]byte("\xEF\xBB\xBF"))
+
+	cw := csv.NewWriter(w)
+
+	// 2. Write Headers
+	headers := []string{"Row Index", "Name", "Phone", "Date", "Province", "City", "District", "Address", "Status", "Error Message"}
+	if err := cw.Write(headers); err != nil {
+		return err
+	}
+	cw.Flush()
+
+	// 3. Stream Rows from DB
+	rows, err := s.DB.Model(&model.Record{}).
+		Where("batch_id = ?", batchID).
+		Order("row_index asc").
+		Rows()
+
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r model.Record
+		// Scan directly into struct
+		s.DB.ScanRows(rows, &r)
+
+		// Write CSV Row
+		record := []string{
+			fmt.Sprintf("%d", r.RowIndex),
+			r.Name,
+			r.Phone,
+			r.Date,
+			r.Province,
+			r.City,
+			r.District,
+			r.Address,
+			string(r.Status),
+			r.ErrorMessage,
+		}
+
+		if err := cw.Write(record); err != nil {
+			return err
+		}
+
+		// Periodic flushing is usually handled by csv.Writer buffer,
+		// but we can check errors periodically if needed.
 	}
 
+	cw.Flush()
+	return cw.Error()
+}
+
+// ExportBatchWithExcelStream streams the batch data as Excel (xlsx)
+func (s *CleanerService) ExportBatchWithExcelStream(batchID string, w io.Writer) error {
 	f := excelize.NewFile()
-	sheet := "Sheet1"
-	f.SetSheetName("Sheet1", sheet)
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Printf("Error closing excel file: %v\n", err)
+		}
+	}()
 
-	// Headers
-	headers := []string{"ID", "Name", "Phone", "Date", "Province", "City", "District", "Address", "Status", "Error Message"}
-	for i, h := range headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheet, cell, h)
+	// Use StreamWriter for high-performance writing
+	sw, err := f.NewStreamWriter("Sheet1")
+	if err != nil {
+		return err
 	}
 
-	// Data
-	for i, r := range records {
-		rowIdx := i + 2
-		f.SetCellValue(sheet, fmt.Sprintf("A%d", rowIdx), r.RowIndex)
-		f.SetCellValue(sheet, fmt.Sprintf("B%d", rowIdx), r.Name)
-		f.SetCellValue(sheet, fmt.Sprintf("C%d", rowIdx), r.Phone)
-		f.SetCellValue(sheet, fmt.Sprintf("D%d", rowIdx), r.Date)
-		f.SetCellValue(sheet, fmt.Sprintf("E%d", rowIdx), r.Province)
-		f.SetCellValue(sheet, fmt.Sprintf("F%d", rowIdx), r.City)
-		f.SetCellValue(sheet, fmt.Sprintf("G%d", rowIdx), r.District)
-		f.SetCellValue(sheet, fmt.Sprintf("H%d", rowIdx), r.Address)
-		f.SetCellValue(sheet, fmt.Sprintf("I%d", rowIdx), r.Status)
-		f.SetCellValue(sheet, fmt.Sprintf("J%d", rowIdx), r.ErrorMessage)
+	// Write Headers
+	headers := []interface{}{"Row Index", "Name", "Phone", "Date", "Province", "City", "District", "Address", "Status", "Error Message"}
+	if err := sw.SetRow("A1", headers); err != nil {
+		return err
 	}
 
-	exportDir := "exports"
-	if _, err := os.Stat(exportDir); os.IsNotExist(err) {
-		os.Mkdir(exportDir, 0755)
+	// Stream Rows from DB
+	rows, err := s.DB.Model(&model.Record{}).
+		Where("batch_id = ?", batchID).
+		Order("row_index asc").
+		Rows()
+
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	currentRow := 2
+	for rows.Next() {
+		var r model.Record
+		s.DB.ScanRows(rows, &r)
+
+		// Excel row data
+		values := []interface{}{
+			r.RowIndex,
+			r.Name,
+			r.Phone,
+			r.Date,
+			r.Province,
+			r.City,
+			r.District,
+			r.Address,
+			string(r.Status),
+			r.ErrorMessage,
+		}
+
+		cell, _ := excelize.CoordinatesToCellName(1, currentRow)
+		if err := sw.SetRow(cell, values); err != nil {
+			return err
+		}
+		currentRow++
+
+		// Check Excel Row Limit (1,048,576)
+		if currentRow > 1048576 {
+			// Simply stop for now. Multi-sheet support makes this much more complex.
+			log.Println("Warning: Excel row limit reached, truncating data.")
+			break
+		}
 	}
 
-	filename := filepath.Join(exportDir, fmt.Sprintf("batch_%s.xlsx", batchID))
-	if err := f.SaveAs(filename); err != nil {
-		return "", "", err
+	if err := sw.Flush(); err != nil {
+		return err
 	}
 
-	// For the download name, replace .csv with .xlsx if it's currently .csv
-	downloadName := batch.OriginalFilename
-	ext := filepath.Ext(downloadName)
-	if strings.ToLower(ext) == ".csv" {
-		downloadName = strings.TrimSuffix(downloadName, ext) + ".xlsx"
-	} else if ext == "" {
-		downloadName = downloadName + ".xlsx"
-	}
-
-	return filename, downloadName, nil
+	// Write to io.Writer (the HTTP response)
+	_, err = f.WriteTo(w)
+	return err
 }
 
 // GetBatches returns all import batches, optionally filtering by user
