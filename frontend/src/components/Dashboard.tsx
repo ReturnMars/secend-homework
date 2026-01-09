@@ -153,7 +153,14 @@ export default function Dashboard() {
             <div className="space-y-4">
                 <div className="flex items-center justify-between px-1">
                     <h2 className="text-lg font-semibold tracking-tight">Recent Activity</h2>
-                    <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground h-8 text-xs">View All</Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-foreground h-8 text-xs"
+                        onClick={() => navigate('/history')}
+                    >
+                        View All
+                    </Button>
                 </div>
 
                 <div className="border rounded-xl bg-card/50 backdrop-blur-sm shadow-sm overflow-hidden">

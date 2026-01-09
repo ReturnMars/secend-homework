@@ -9,6 +9,8 @@ lerna-debug.log*
 backend/uploads
 backend/data
 backend/exports
+backend/tmp
+backend/temp
 *.db
 node_modules
 dist
