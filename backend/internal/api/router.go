@@ -15,7 +15,7 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 	// CORS Setup
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept"}
 	r.Use(cors.New(config))
 
@@ -28,6 +28,7 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 		api.GET("/batches/:id", h.GetBatchStatus)
 		api.GET("/batches/:id/records", h.GetBatchRecords)
 		api.GET("/batches/:id/export", h.ExportBatch)
+		api.PATCH("/batches/:id", h.UpdateBatch)
 		api.GET("/batches/:id/progress", h.StreamBatchProgress) // SSE Endpoint
 
 		// CRUD & Versioning

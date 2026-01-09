@@ -25,6 +25,11 @@ func NewCleanerService() *CleanerService {
 	return &CleanerService{DB: repository.DB}
 }
 
+// UpdateBatchName updates the original filename of a batch
+func (s *CleanerService) UpdateBatchName(id string, newName string) error {
+	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", id).Update("original_filename", newName).Error
+}
+
 // ProcessFileAsync starts a goroutine to process the file
 func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 	go func() {
@@ -178,7 +183,7 @@ func (s *CleanerService) GetBatch(id string) (*model.ImportBatch, error) {
 	return &batch, err
 }
 
-func (s *CleanerService) GetRecords(batchID string, filter string, page, pageSize int) ([]model.Record, int64, error) {
+func (s *CleanerService) GetRecords(batchID string, filter string, search string, page, pageSize int) ([]model.Record, int64, error) {
 	var records []model.Record
 	var total int64
 
@@ -190,6 +195,10 @@ func (s *CleanerService) GetRecords(batchID string, filter string, page, pageSiz
 		query = query.Where("status != ?", "Clean")
 	}
 
+	if search != "" {
+		query = query.Where("name LIKE ?", "%"+search+"%")
+	}
+
 	query.Count(&total)
 
 	offset := (page - 1) * pageSize
@@ -199,10 +208,15 @@ func (s *CleanerService) GetRecords(batchID string, filter string, page, pageSiz
 }
 
 // ExportBatch generates an Excel file for the batch
-func (s *CleanerService) ExportBatch(batchID string) (string, error) {
+func (s *CleanerService) ExportBatch(batchID string) (string, string, error) {
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, "id = ?", batchID).Error; err != nil {
+		return "", "", err
+	}
+
 	var records []model.Record
 	if err := s.DB.Where("batch_id = ?", batchID).Order("row_index asc").Find(&records).Error; err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	f := excelize.NewFile()
@@ -238,10 +252,19 @@ func (s *CleanerService) ExportBatch(batchID string) (string, error) {
 
 	filename := filepath.Join(exportDir, fmt.Sprintf("batch_%s.xlsx", batchID))
 	if err := f.SaveAs(filename); err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	return filename, nil
+	// For the download name, replace .csv with .xlsx if it's currently .csv
+	downloadName := batch.OriginalFilename
+	ext := filepath.Ext(downloadName)
+	if strings.ToLower(ext) == ".csv" {
+		downloadName = strings.TrimSuffix(downloadName, ext) + ".xlsx"
+	} else if ext == "" {
+		downloadName = downloadName + ".xlsx"
+	}
+
+	return filename, downloadName, nil
 }
 
 // GetBatches returns all import batches

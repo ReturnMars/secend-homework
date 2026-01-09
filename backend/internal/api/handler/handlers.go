@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -116,14 +117,14 @@ func (h *CsvHandler) GetBatchRecords(c *gin.Context) {
 // ExportBatch downloads the processed CSV/Excel
 func (h *CsvHandler) ExportBatch(c *gin.Context) {
 	id := c.Param("id")
-	filePath, err := h.Service.ExportBatch(id)
+	filePath, downloadName, err := h.Service.ExportBatch(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// Force download
+	// Force download with encoded filename
 	c.Header("Content-Description", "File Transfer")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filepath.Base(filePath)))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(downloadName)))
 	c.File(filePath)
 }
 
@@ -246,4 +247,23 @@ func (h *CsvHandler) UpdateVersionReason(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Reason updated successfully"})
+}
+
+// UpdateBatch handles updating batch metadata (like filename)
+func (h *CsvHandler) UpdateBatch(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.Service.UpdateBatchName(id, req.Name); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Batch updated successfully"})
 }

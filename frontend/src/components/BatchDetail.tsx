@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     CheckCircle, XCircle, AlertCircle, Download,
     Filter, ArrowLeft, History as HistoryIcon, RotateCcw,
-    FileText, Check, X
+    FileText, Check, X, Pencil
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
+
 import {
     Sheet,
     SheetContent,
@@ -69,6 +70,8 @@ const formSchema = z.object({
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+const MotionTableRow = motion(TableRow);
 
 interface Record {
     id: number;
@@ -133,6 +136,61 @@ export default function BatchDetail() {
     const [editingVersionId, setEditingVersionId] = useState<number | null>(null);
     const [tempReason, setTempReason] = useState("");
     const [rollbackVersionId, setRollbackVersionId] = useState<number | null>(null);
+
+    // Batch Name Edit State
+    const [isEditingBatchName, setIsEditingBatchName] = useState(false);
+    const [tempBatchName, setTempBatchName] = useState("");
+    const [extension, setExtension] = useState("");
+
+    const handleStartEditBatchName = () => {
+        if (!batch) return;
+        const lastDotIndex = batch.original_filename.lastIndexOf('.');
+        if (lastDotIndex > 0) {
+            setTempBatchName(batch.original_filename.substring(0, lastDotIndex));
+            setExtension(batch.original_filename.substring(lastDotIndex));
+        } else {
+            setTempBatchName(batch.original_filename);
+            setExtension("");
+        }
+        setIsEditingBatchName(true);
+    };
+
+    const handleSaveBatchName = async () => {
+        if (!id || !batch) return;
+        const finalName = tempBatchName.trim() + extension;
+
+        if (!tempBatchName.trim()) {
+            toast.error("Filename cannot be empty");
+            setIsEditingBatchName(false);
+            return;
+        }
+
+        // Diff check: only submit if changed
+        if (finalName === batch.original_filename) {
+            setIsEditingBatchName(false);
+            return;
+        }
+
+        try {
+            const res = await fetch(`http://localhost:8080/api/batches/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: finalName })
+            });
+            if (res.ok) {
+                setBatch(prev => prev ? { ...prev, original_filename: finalName } : null);
+                setIsEditingBatchName(false);
+                toast.success("Batch renamed successfully");
+            } else {
+                toast.error("Failed to rename batch");
+                setIsEditingBatchName(false);
+            }
+        } catch (err) {
+            console.error(err);
+            toast.error("Network error");
+            setIsEditingBatchName(false);
+        }
+    };
 
     const fetchHistory = (recordId: number) => {
         fetch(`http://localhost:8080/api/records/${recordId}/history`)
@@ -327,8 +385,37 @@ export default function BatchDetail() {
                     <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
                         <ArrowLeft className="h-5 w-5" />
                     </Button>
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight">{batch.original_filename}</h1>
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-1 group">
+                            {isEditingBatchName ? (
+                                <div className="flex items-baseline border-b-2 border-primary/50 focus-within:border-primary transition-colors pb-0.5">
+                                    <input
+                                        value={tempBatchName}
+                                        onChange={(e) => setTempBatchName(e.target.value)}
+                                        className="text-2xl font-bold bg-transparent outline-none min-w-[50px] w-fit"
+                                        style={{ width: `${Math.max(tempBatchName.length || 1, 1)}ch` }}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSaveBatchName()}
+                                        onBlur={handleSaveBatchName}
+                                        autoFocus
+                                    />
+                                    <span className="text-2xl font-bold text-muted-foreground/40 pointer-events-none select-none">
+                                        {extension}
+                                    </span>
+                                </div>
+                            ) : (
+                                <>
+                                    <h1 className="text-2xl font-bold tracking-tight">{batch.original_filename}</h1>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
+                                        onClick={handleStartEditBatchName}
+                                    >
+                                        <Pencil className="h-4 w-4" />
+                                    </Button>
+                                </>
+                            )}
+                        </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Badge variant="outline">{batch.status}</Badge>
                             <span>Processed {new Date(batch.created_at).toLocaleString()}</span>
@@ -410,54 +497,51 @@ export default function BatchDetail() {
                                     </TableRow>
                                 ) : (
                                     <AnimatePresence mode="popLayout">
-                                        {records.map((record) => {
-                                            const MotionTableRow = motion(TableRow);
-                                            return (
-                                                <MotionTableRow
-                                                    key={record.id}
-                                                    initial={{ opacity: 0, y: 4 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    exit={{ opacity: 0, scale: 0.95 }}
-                                                    className="group"
-                                                    layout
-                                                >
-                                                    <TableCell className="text-center text-muted-foreground font-mono text-xs w-[60px]">{record.row_index}</TableCell>
-                                                    <TableCell className="font-medium text-foreground/90 w-[120px]">{record.name}</TableCell>
-                                                    <TableCell className="text-foreground/80 w-[130px]">{record.phone}</TableCell>
-                                                    <TableCell className="text-foreground/80 w-[110px]">{record.date || '-'}</TableCell>
-                                                    <TableCell className="text-muted-foreground/70 text-xs">
-                                                        <div className="truncate max-w-[200px]" title={[record.province, record.city, record.district].filter(Boolean).join(' ')}>
-                                                            {[record.province, record.city, record.district].filter(Boolean).join(' ')}
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell className="w-[120px]">
-                                                        {record.status === 'Clean' ? (
-                                                            <Badge variant="outline" className="bg-green-50/50 text-green-700 border-green-200/60 shadow-none font-medium h-5 px-1.5 text-[10px]">
-                                                                <CheckCircle className="mr-1 h-2.5 w-2.5" /> Valid
+                                        {records.map((record) => (
+                                            <MotionTableRow
+                                                key={record.id}
+                                                initial={{ opacity: 0, y: 4 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, scale: 0.95 }}
+                                                className="group"
+                                                layout
+                                            >
+                                                <TableCell className="text-center text-muted-foreground font-mono text-xs w-[60px]">{record.row_index}</TableCell>
+                                                <TableCell className="font-medium text-foreground/90 w-[120px]">{record.name}</TableCell>
+                                                <TableCell className="text-foreground/80 w-[130px]">{record.phone}</TableCell>
+                                                <TableCell className="text-foreground/80 w-[110px]">{record.date || '-'}</TableCell>
+                                                <TableCell className="text-muted-foreground/70 text-xs">
+                                                    <div className="truncate max-w-[200px]" title={[record.province, record.city, record.district].filter(Boolean).join(' ')}>
+                                                        {[record.province, record.city, record.district].filter(Boolean).join(' ')}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell className="w-[120px]">
+                                                    {record.status === 'Clean' ? (
+                                                        <Badge variant="outline" className="bg-green-50/50 text-green-700 border-green-200/60 shadow-none font-medium h-5 px-1.5 text-[10px]">
+                                                            <CheckCircle className="mr-1 h-2.5 w-2.5" /> Valid
+                                                        </Badge>
+                                                    ) : (
+                                                        <div className="flex flex-col gap-0.5">
+                                                            <Badge variant="destructive" className="w-fit shadow-none font-medium h-5 px-1.5 text-[10px]">
+                                                                <XCircle className="mr-1 h-2.5 w-2.5" /> Invalid
                                                             </Badge>
-                                                        ) : (
-                                                            <div className="flex flex-col gap-0.5">
-                                                                <Badge variant="destructive" className="w-fit shadow-none font-medium h-5 px-1.5 text-[10px]">
-                                                                    <XCircle className="mr-1 h-2.5 w-2.5" /> Invalid
-                                                                </Badge>
-                                                                <span className="text-[10px] leading-tight text-red-500/60 line-clamp-1" title={record.error_message}>
-                                                                    {record.error_message}
-                                                                </span>
-                                                            </div>
-                                                        )}
-                                                    </TableCell>
-                                                    <TableCell className="text-right w-[90px]">
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={() => handleEditClick(record)}
-                                                        >
-                                                            Edit
-                                                        </Button>
-                                                    </TableCell>
-                                                </MotionTableRow>
-                                            )
-                                        })}
+                                                            <span className="text-[10px] leading-tight text-red-500/60 line-clamp-1" title={record.error_message}>
+                                                                {record.error_message}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-right w-[90px]">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => handleEditClick(record)}
+                                                    >
+                                                        Edit
+                                                    </Button>
+                                                </TableCell>
+                                            </MotionTableRow>
+                                        ))}
                                     </AnimatePresence>
                                 )}
                             </TableBody>
