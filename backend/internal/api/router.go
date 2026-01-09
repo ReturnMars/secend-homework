@@ -20,10 +20,13 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 	r.Use(cors.New(config))
 
 	h := handler.NewCsvHandler(svc)
+	authHandler := handler.NewAuthHandler()
 
 	// API Routes
 	api := r.Group("/api")
 	{
+		api.POST("/login", authHandler.Login)
+		api.POST("/register", authHandler.Register)
 		api.POST("/upload", h.Upload)
 		api.GET("/batches/:id", h.GetBatchStatus)
 		api.GET("/batches/:id/records", h.GetBatchRecords)

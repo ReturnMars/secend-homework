@@ -27,7 +27,9 @@ export default function Login() {
   const location = useLocation();
   const { login } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const from = (location.state as any)?.from?.pathname || "/";
 
@@ -42,14 +44,48 @@ export default function Login() {
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
-      await login(values.username, values.password);
-      setTimeout(() => {
-        navigate(from, { replace: true });
-      }, 300);
-    } catch (err) {
-      setError("Invalid credentials.");
+      if (isRegistering) {
+        // Register Logic
+        const res = await fetch("http://localhost:8080/api/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(values),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Registration failed");
+        }
+
+        setSuccess("Account created successfully! Signing in...");
+
+        // Auto login after small delay
+        setTimeout(async () => {
+          try {
+            await login(values.username, values.password);
+            navigate(from, { replace: true });
+          } catch (loginErr) {
+            setError(
+              "Registration successful, but auto-login failed. Please sign in."
+            );
+            setIsRegistering(false);
+            setSuccess(null);
+            setIsLoading(false);
+          }
+        }, 800);
+      } else {
+        // Login Logic
+        await login(values.username, values.password);
+        setTimeout(() => {
+          navigate(from, { replace: true });
+        }, 300);
+      }
+    } catch (err: any) {
+      console.error("Auth error:", err);
+      setError(err.message || "Operation failed. Please check your inputs.");
       setIsLoading(false);
     }
   }
@@ -59,12 +95,12 @@ export default function Login() {
       {/* 
         Fixed Dot Pattern 
         Using direct CSS to guarantee visibility. 
-        #94a3b8 is slate-400 (visible gray dots) on white background.
+        #cbd5e1 is slate-300 (visible gray dots) on white background.
       */}
       <div
         className="absolute inset-0 z-0 pointer-events-none"
         style={{
-          backgroundImage: "radial-gradient(#cbd5e1 1.5px, transparent 1.5px)", // slightly lighter gray for elegance
+          backgroundImage: "radial-gradient(#cbd5e1 1.5px, transparent 1.5px)",
           backgroundSize: "24px 24px",
           opacity: 0.8,
         }}
@@ -123,9 +159,11 @@ export default function Login() {
                         <FormLabel className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
                           Password
                         </FormLabel>
-                        <span className="text-[10px] font-medium text-zinc-400 hover:text-black cursor-pointer transition-colors">
-                          FORGOT?
-                        </span>
+                        {!isRegistering && (
+                          <span className="text-[10px] font-medium text-zinc-400 hover:text-black cursor-pointer transition-colors">
+                            FORGOT?
+                          </span>
+                        )}
                       </div>
                       <FormControl>
                         <Input
@@ -145,6 +183,11 @@ export default function Login() {
                     {error}
                   </div>
                 )}
+                {success && (
+                  <div className="text-xs font-medium text-green-600 bg-green-50 border border-green-100 p-2.5 rounded-md flex items-center justify-center animate-in slide-in-from-top-1">
+                    {success}
+                  </div>
+                )}
 
                 <Button
                   className="w-full mt-2 h-10 bg-black hover:bg-zinc-800 text-white font-medium shadow-lg shadow-black/5 hover:shadow-black/10 transition-all active:scale-[0.98]"
@@ -154,11 +197,14 @@ export default function Login() {
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Authenticating
+                      {isRegistering
+                        ? "Creating account..."
+                        : "Authenticating..."}
                     </>
                   ) : (
                     <>
-                      Sign In <ArrowRight className="ml-2 h-4 w-4 opacity-70" />
+                      {isRegistering ? "Create Account" : "Sign In"}{" "}
+                      <ArrowRight className="ml-2 h-4 w-4 opacity-70" />
                     </>
                   )}
                 </Button>
@@ -167,10 +213,27 @@ export default function Login() {
           </CardContent>
         </Card>
 
-        {/* Footer */}
+        {/* Toggle between Login and Register */}
         <div className="mt-8 text-center">
-          <p className="text-xs text-zinc-400 font-medium">
-            Protected by secure encryption
+          <p className="text-xs text-zinc-500">
+            {isRegistering
+              ? "Already have an account? "
+              : "Don't have an account? "}
+            <span
+              onClick={() => {
+                setIsRegistering(!isRegistering);
+                setError(null);
+                setSuccess(null);
+                form.reset();
+              }}
+              className="text-zinc-900 font-semibold cursor-pointer hover:underline underline-offset-4"
+            >
+              {isRegistering ? "Sign in" : "Get started"}
+            </span>
+          </p>
+
+          <p className="text-[10px] text-zinc-400 font-medium mt-4">
+            © 2026 Data Governance Team
           </p>
         </div>
       </div>
