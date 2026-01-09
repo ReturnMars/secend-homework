@@ -337,10 +337,32 @@ func (s *CleanerService) RollbackRecord(recordID, versionID string) (*model.Reco
 	beforeBytes, _ := json.Marshal(record)
 	beforeJSON := string(beforeBytes)
 
-	// Parse the target state from the version's "After" field
-	targetData, err := s.smartUnmarshal(version.After)
+	// Determine if we are rolling back the latest version (Undo) or restoring an old version
+	var newerCount int64
+	s.DB.Model(&model.RecordVersion{}).Where("record_id = ? AND id > ?", recordID, version.ID).Count(&newerCount)
+
+	var targetJSON string
+	var reason string
+
+	if newerCount == 0 {
+		// Target is the latest version. "Rollback" here implies "Undo this change".
+		// So we want to go back to the state BEFORE this version.
+		targetJSON = version.Before
+		reason = fmt.Sprintf("Undo Rev %d (Version ID: %d)", version.ID, version.ID) // Assuming ID is usable, but it's string in args, uint in struct.
+		// Wait, args are string, struct is uint. Let's use version.ID (uint) directly in Sprintf
+		reason = fmt.Sprintf("Undo (Revert) Change #%d", version.ID)
+
+	} else {
+		// Target is an older version. "Rollback" implies "Restore to this state".
+		// So we want the state AFTER this version.
+		targetJSON = version.After
+		reason = fmt.Sprintf("Restore to State #%d", version.ID)
+	}
+
+	// Parse the target state
+	targetData, err := s.smartUnmarshal(targetJSON)
 	if err != nil {
-		fmt.Printf("ROLLBACK_ERROR: Failed to unmarshal version %d. Content: %s\n", version.ID, version.After)
+		fmt.Printf("ROLLBACK_ERROR: Failed to unmarshal version %d target data. Content: %s\n", version.ID, targetJSON)
 		return nil, fmt.Errorf("failed to parse version data (ID: %d): %v", version.ID, err)
 	}
 
@@ -378,7 +400,7 @@ func (s *CleanerService) RollbackRecord(recordID, versionID string) (*model.Reco
 		Before:    beforeJSON,
 		After:     afterJSON,
 		ChangedAt: time.Now(),
-		Reason:    fmt.Sprintf("Rollback to Rev %d (Version ID: %s)", version.ID, versionID),
+		Reason:    reason,
 	}
 	s.DB.Create(&rollbackVersion)
 
