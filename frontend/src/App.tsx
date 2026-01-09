@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Github, BookOpen, Command } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import BatchDetail from './components/BatchDetail';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -51,10 +52,12 @@ function App() {
         </header>
 
         <main className="flex-1 flex flex-col">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/batches/:id" element={<BatchDetail />} />
-          </Routes>
+          <ErrorBoundary>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/batches/:id" element={<BatchDetail />} />
+            </Routes>
+          </ErrorBoundary>
         </main>
 
         {/* Footer */}
