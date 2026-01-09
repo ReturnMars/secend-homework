@@ -25,10 +25,11 @@ export interface ProcessStats {
 }
 
 interface UploadZoneProps {
-  onSuccess: (stats: ProcessStats) => void;
+  onSuccess: (stats: ProcessStats, fileName?: string) => void;
+  onTaskStarted?: (batchId: string, fileName: string) => void;
 }
 
-const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
+const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -154,6 +155,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
           console.log("[Instant Upload] File found on server.");
           const b_id = (checkRes as any).batch_id.toString();
           setUploadProgress(100);
+          if (onTaskStarted) onTaskStarted(b_id, file.name);
           setPhase("processing");
           processingStartTimeRef.current = Date.now();
           startSSE(b_id);
@@ -173,6 +175,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
       );
 
       const { batch_id } = res;
+      if (onTaskStarted) onTaskStarted(batch_id.toString(), file.name);
       setPhase("processing");
       processingStartTimeRef.current = Date.now();
       startSSE(batch_id.toString());
@@ -349,7 +352,12 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                       <MetricItem label="Total" value={`${(metrics.total / 10000).toFixed(1)}w`} />
                       <MetricItem label="Cleaned" value={`${(metrics.success / 10000).toFixed(1)}w`} color="text-green-500" />
                       <MetricItem label="Dirty" value={`${(metrics.failed / 10000).toFixed(1)}w`} color="text-amber-500" />
-                      <MetricItem label="Speed" value={`${(metrics.speed / 1000).toFixed(1)}k`} unit="r/s" hasZap />
+                      <MetricItem
+                        label="Speed"
+                        value={processProgress === 100 && metrics.speed === 0 ? "CACHED" : `${(metrics.speed / 1000).toFixed(1)}k`}
+                        unit={processProgress === 100 && metrics.speed === 0 ? "" : "r/s"}
+                        hasZap
+                      />
                     </div>
 
                     <div className="space-y-3 pt-2">
@@ -364,8 +372,12 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                             <span className="font-mono font-bold">{formatTime(metrics.elapsed)}</span>
                           </div>
                           <div className="flex items-center gap-1.5 bg-primary text-primary-foreground px-2 py-1 rounded-md min-w-[100px]">
-                            <span className="opacity-70 text-[8px] uppercase font-black">ETA</span>
-                            <span className="font-mono font-bold leading-none">{metrics.eta > 0 ? formatTime(metrics.eta) : "--"}</span>
+                            <span className="opacity-70 text-[8px] uppercase font-black">
+                              {processProgress === 100 ? "Status" : "ETA"}
+                            </span>
+                            <span className="font-mono font-bold leading-none">
+                              {processProgress === 100 ? "FINISHED" : (metrics.eta > 0 ? formatTime(metrics.eta) : "--")}
+                            </span>
                           </div>
                         </div>
                       </div>

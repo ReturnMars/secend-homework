@@ -22,6 +22,7 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer";
 import UploadZone from "../components/UploadZone";
+import TaskManager from "../components/TaskManager";
 
 interface Batch {
   id: number;
@@ -35,28 +36,49 @@ interface Batch {
 export default function Dashboard() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [activeTasks, setActiveTasks] = useState<{ id: string; name: string }[]>([]);
   const navigate = useNavigate();
 
+  const fetchBatches = async () => {
+    try {
+      const data = await api.get<Batch[]>("/batches");
+      if (Array.isArray(data)) {
+        setBatches(data);
+        // 自动发现所有活动任务
+        const ongoing = data
+          .filter(b => b.status === "Processing" || b.status === "Pending")
+          .map(b => ({ id: b.id.toString(), name: b.original_filename }));
+
+        setActiveTasks(prev => {
+          const existingIds = prev.map(t => t.id);
+          const newTasks = ongoing.filter(o => !existingIds.includes(o.id));
+          return [...prev, ...newTasks];
+        });
+      }
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+    }
+  };
+
   useEffect(() => {
-    // api wrapper automatically attaches token from localStorage
-    api
-      .get<Batch[]>("/batches")
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setBatches(data);
-        } else {
-          setBatches([]);
-        }
-      })
-      .catch((err) => {
-        console.error("Dashboard fetch error:", err);
-        setBatches([]);
-      });
+    fetchBatches();
+    // 轮询列表中批次的基本状态
+    const timer = setInterval(fetchBatches, 10000);
+    return () => clearInterval(timer);
   }, []);
 
-  const handleUploadSuccess = (stats: any) => {
+  const handleTaskStarted = (id: string, name: string) => {
+    setActiveTasks(prev => {
+      if (prev.some(t => t.id === id)) return prev;
+      return [...prev, { id, name }];
+    });
+  };
+
+  const handleUploadSuccess = (stats: any, fileName?: string) => {
     setIsUploadOpen(false);
-    navigate(`/batches/${stats.result_id}`);
+    if (stats.batch_id || stats.result_id) {
+      handleTaskStarted(String(stats.batch_id || stats.result_id), fileName || "Unknown File");
+    }
   };
 
   return (
@@ -83,7 +105,10 @@ export default function Dashboard() {
                 </DrawerDescription>
               </DrawerHeader>
               <div className="p-4 pb-0">
-                <UploadZone onSuccess={handleUploadSuccess} />
+                <UploadZone
+                  onSuccess={handleUploadSuccess}
+                  onTaskStarted={handleTaskStarted}
+                />
               </div>
               <DrawerFooter>
                 <DrawerClose asChild>
@@ -172,18 +197,18 @@ export default function Dashboard() {
             <div className="text-3xl font-bold text-foreground tracking-tighter">
               {batches.length > 0
                 ? new Date(batches[0].created_at).toLocaleDateString(
-                    undefined,
-                    { month: "short", day: "numeric" }
-                  )
+                  undefined,
+                  { month: "short", day: "numeric" }
+                )
                 : "-"}
             </div>
             <div className="flex items-center text-xs text-muted-foreground mt-2">
               <span className="opacity-80">
                 {batches.length > 0
                   ? new Date(batches[0].created_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
                   : "No imports yet"}
               </span>
             </div>
@@ -252,19 +277,17 @@ export default function Dashboard() {
                       </div>
                       <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${
-                            batch.success_count / batch.total_rows >= 0.9
-                              ? "bg-green-500"
-                              : batch.success_count / batch.total_rows >= 0.5
+                          className={`h-full rounded-full ${batch.success_count / batch.total_rows >= 0.9
+                            ? "bg-green-500"
+                            : batch.success_count / batch.total_rows >= 0.5
                               ? "bg-blue-500"
                               : "bg-amber-500"
-                          }`}
+                            }`}
                           style={{
-                            width: `${
-                              batch.total_rows > 0
-                                ? (batch.success_count / batch.total_rows) * 100
-                                : 0
-                            }%`,
+                            width: `${batch.total_rows > 0
+                              ? (batch.success_count / batch.total_rows) * 100
+                              : 0
+                              }%`,
                           }}
                         />
                       </div>
@@ -273,18 +296,16 @@ export default function Dashboard() {
                   <td className="py-3 px-4">
                     <Badge
                       variant="outline"
-                      className={`font-normal border-0 px-2 py-0.5 ${
-                        batch.status === "Completed"
-                          ? "bg-green-500/10 text-green-700 hover:bg-green-500/20"
-                          : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                      }`}
+                      className={`font-normal border-0 px-2 py-0.5 ${batch.status === "Completed"
+                        ? "bg-green-500/10 text-green-700 hover:bg-green-500/20"
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                        }`}
                     >
                       <span
-                        className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                          batch.status === "Completed"
-                            ? "bg-green-500"
-                            : "bg-gray-500"
-                        }`}
+                        className={`w-1.5 h-1.5 rounded-full mr-1.5 ${batch.status === "Completed"
+                          ? "bg-green-500"
+                          : "bg-gray-500"
+                          }`}
                       />
                       {batch.status}
                     </Badge>
@@ -319,6 +340,12 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+      {!isUploadOpen && activeTasks.length > 0 && (
+        <TaskManager
+          tasks={activeTasks}
+          onCloseTask={(id) => setActiveTasks(prev => prev.filter(t => t.id !== id))}
+        />
+      )}
     </div>
   );
 }
