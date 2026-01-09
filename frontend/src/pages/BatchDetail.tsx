@@ -4,15 +4,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 
 // Internal Components
-import { BatchHeader } from './batch-detail/BatchHeader';
-import { StatsCards } from './batch-detail/StatsCards';
-import { RecordTable } from './batch-detail/RecordTable';
-import { EditRecordSheet } from './batch-detail/EditRecordSheet';
+import { BatchHeader } from '../components/batch-detail/BatchHeader';
+import { StatsCards } from '../components/batch-detail/StatsCards';
+import { RecordTable } from '../components/batch-detail/RecordTable';
+import { EditRecordSheet } from '../components/batch-detail/EditRecordSheet';
 
 // Hooks
-import { useBatchData } from './batch-detail/hooks/useBatchData';
-import { useRecords } from './batch-detail/hooks/useRecords';
-import { useRecordEditor } from './batch-detail/hooks/useRecordEditor';
+import { useBatchData } from '../components/batch-detail/hooks/useBatchData';
+import { useRecords } from '../components/batch-detail/hooks/useRecords';
+import { useRecordEditor } from '../components/batch-detail/hooks/useRecordEditor';
 
 const formSchema = z.object({
     name: z.string().min(1, "Name is required").transform(v => v.trim()),

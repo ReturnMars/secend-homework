@@ -14,7 +14,7 @@ import {
     DrawerTitle,
     DrawerTrigger,
 } from "@/components/ui/drawer";
-import UploadZone from './UploadZone';
+import UploadZone from '../components/UploadZone';
 
 interface Batch {
     id: number;

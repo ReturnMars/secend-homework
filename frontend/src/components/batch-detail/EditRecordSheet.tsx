@@ -29,6 +29,15 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { CalendarIcon } from 'lucide-react';
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { Calendar } from "@/components/ui/calendar";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
 import type { UseFormReturn } from "react-hook-form";
 import type { Record, RecordVersion } from './types';
 
@@ -191,11 +200,12 @@ export function EditRecordSheet({
                                                             </FormItem>
                                                         )}
                                                     />
+
                                                     <FormField
                                                         control={form.control}
                                                         name="date"
                                                         render={({ field }) => (
-                                                            <FormItem className="space-y-2">
+                                                            <FormItem className="space-y-2 flex flex-col">
                                                                 <div className="flex items-center justify-between h-4">
                                                                     <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</FormLabel>
                                                                     <AnimatePresence>
@@ -206,9 +216,38 @@ export function EditRecordSheet({
                                                                         )}
                                                                     </AnimatePresence>
                                                                 </div>
-                                                                <FormControl>
-                                                                    <Input {...field} className="h-10" />
-                                                                </FormControl>
+                                                                <Popover>
+                                                                    <PopoverTrigger asChild>
+                                                                        <FormControl>
+                                                                            <Button
+                                                                                variant={"outline"}
+                                                                                className={cn(
+                                                                                    "h-10 pl-3 text-left font-normal border-input hover:bg-background hover:text-foreground",
+                                                                                    !field.value && "text-muted-foreground"
+                                                                                )}
+                                                                            >
+                                                                                {field.value ? (
+                                                                                    format(new Date(field.value), "yyyy年MM月dd日")
+                                                                                ) : (
+                                                                                    <span>选择日期</span>
+                                                                                )}
+                                                                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                                                            </Button>
+                                                                        </FormControl>
+                                                                    </PopoverTrigger>
+                                                                    <PopoverContent className="w-auto p-0" align="start">
+                                                                        <Calendar
+                                                                            mode="single"
+                                                                            selected={field.value ? new Date(field.value) : undefined}
+                                                                            onSelect={(date) => {
+                                                                                field.onChange(date ? format(date, "yyyy-MM-dd") : "");
+                                                                            }}
+                                                                            disabled={(date) =>
+                                                                                date > new Date() || date < new Date("1900-01-01")
+                                                                            }
+                                                                        />
+                                                                    </PopoverContent>
+                                                                </Popover>
                                                             </FormItem>
                                                         )}
                                                     />
