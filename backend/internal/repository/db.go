@@ -17,6 +17,31 @@ import (
 
 var DB *gorm.DB
 
+// DropSearchIndexes 暂时移除索引以加速大文件写入
+func DropSearchIndexes() {
+	log.Println("[Perf] Dropping all indexes for massive insertion...")
+	DB.Exec("DROP INDEX IF EXISTS idx_records_fast_phone")
+	DB.Exec("DROP INDEX IF EXISTS idx_records_fast_name")
+	DB.Exec("DROP INDEX IF EXISTS idx_records_batch_row")
+	// 额外清理可能残留的旧名称索引
+	DB.Exec("DROP INDEX IF EXISTS idx_records_fast_batch_row")
+}
+
+// RebuildSearchIndexes 重建所有索引（在入库完成后执行，效率远高于边写边维护）
+func RebuildSearchIndexes() {
+	log.Println("[Perf] Rebuilding all strategic indexes...")
+	sqls := []struct{ name, sql string }{
+		{"Search Phone", "CREATE INDEX idx_records_fast_phone ON records (batch_id, phone varchar_pattern_ops, row_index)"},
+		{"Search Name", "CREATE INDEX idx_records_fast_name ON records (batch_id, name varchar_pattern_ops, row_index)"},
+		{"Batch Pagination", "CREATE INDEX idx_records_batch_row ON records (batch_id, row_index)"},
+	}
+	for _, item := range sqls {
+		start := time.Now()
+		DB.Exec(item.sql)
+		log.Printf("[Perf] %s indexed in %v", item.name, time.Since(start))
+	}
+}
+
 func InitDB(dsn string) error {
 	var err error
 
@@ -75,9 +100,7 @@ func InitDB(dsn string) error {
 		{"Disable Sync Commit", "SET synchronous_commit TO OFF"},
 		{"Expand Work Mem", "SET work_mem = '64MB'"},
 		{"Expand Maint Work Mem", "SET maintenance_work_mem = '512MB'"},
-		{"Index: Phone (Pattern)", "CREATE INDEX IF NOT EXISTS idx_records_fast_phone ON records (batch_id, phone varchar_pattern_ops, row_index)"},
-		{"Index: Name (Pattern)", "CREATE INDEX IF NOT EXISTS idx_records_fast_name ON records (batch_id, name varchar_pattern_ops, row_index)"},
-		{"Index: Sort/Batch", "CREATE INDEX IF NOT EXISTS idx_records_fast_batch_row ON records (batch_id, row_index)"},
+		// 注意：索引创建已移至 processor.go 的后置阶段，此处不再重复创建以避免启动冲突
 	}
 
 	for _, item := range tuningSQLs {

@@ -7,7 +7,8 @@ import {
   X,
   Clock,
   CheckCircle2,
-  Zap
+  Zap,
+  Loader2
 } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processProgress, setProcessProgress] = useState(0);
-  const [phase, setPhase] = useState<"idle" | "uploading" | "processing">("idle");
+  const [phase, setPhase] = useState<"idle" | "hashing" | "uploading" | "processing">("idle");
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -127,97 +128,132 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
 
     setUploading(true);
     setError(null);
-    setPhase("uploading");
+    setPhase("hashing"); // 标记为正在计算特征
     setUploadProgress(0);
     setProcessProgress(0);
     setMetrics({ total: 0, processed: 0, success: 0, failed: 0, elapsed: 0, eta: 0, speed: 0 });
 
     try {
+      // 1. 生成极速指纹 (Fast Sampling)
+      // 针对 2GB 文件不再进行全量读取，而是采用“前 1MB + 后 1MB + 文件大小”的采样 Hash
+      const SAMPLE_SIZE = 1024 * 1024; // 1MB
+      const head = file.slice(0, SAMPLE_SIZE);
+      const tail = file.slice(Math.max(0, file.size - SAMPLE_SIZE));
+      const metaStr = `${file.size}-${file.lastModified}`;
+      const combinedBuffer = await new Blob([head, tail, new TextEncoder().encode(metaStr)]).arrayBuffer();
+
+      const hashBuffer = await crypto.subtle.digest("SHA-256", combinedBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      console.log("[Hash] Fast Fingerprint generated:", fileHash);
+
+      // 2. 秒传预检
+      try {
+        const checkRes = await api.checkHash(fileHash);
+        if (checkRes && (checkRes as any).exists && (checkRes as any).batch_id) {
+          console.log("[Instant Upload] File found on server.");
+          const b_id = (checkRes as any).batch_id.toString();
+          setUploadProgress(100);
+          setPhase("processing");
+          processingStartTimeRef.current = Date.now();
+          startSSE(b_id);
+          return;
+        }
+      } catch (checkErr) {
+        console.warn("[Instant Check] Proceeding with normal upload", checkErr);
+      }
+
+      // 3. 正常上传流程
+      setPhase("uploading");
       const res = await api.upload<{ batch_id: string }>(
         "/upload",
         file,
-        (p) => setUploadProgress(p)
+        (p) => setUploadProgress(p),
+        { hash: fileHash }
       );
 
       const { batch_id } = res;
       setPhase("processing");
       processingStartTimeRef.current = Date.now();
-
-      const token = localStorage.getItem("auth_token");
-      const evtSource = new EventSource(
-        `http://localhost:8080/api/batches/${batch_id}/progress?token=${token}`
-      );
-
-      evtSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.total_rows > 0) {
-            const processed = data.processed_rows;
-            const total = data.total_rows;
-            const percent = Math.round((processed / total) * 100);
-
-            const now = Date.now();
-            const elapsedMs = now - processingStartTimeRef.current;
-
-            let speed = 0;
-            let eta = 0;
-
-            if (elapsedMs > 2000 && processed > 100) {
-              speed = (processed / (elapsedMs / 1000));
-              const remaining = total - processed;
-              eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
-            }
-
-            setProcessProgress(percent);
-            setMetrics(prev => ({
-              ...prev,
-              total,
-              processed,
-              success: data.filters?.success || 0,
-              failed: data.filters?.failed || 0,
-              speed: Math.round(speed),
-              eta
-            }));
-          }
-
-          if (data.status === "Completed") {
-            evtSource.close();
-            setProcessProgress(100);
-            setTimeout(() => {
-              onSuccess({
-                total_rows: data.total_rows,
-                success_rows: data.filters?.success || 0,
-                failed_rows: data.filters?.failed || 0,
-                result_id: batch_id.toString(),
-                preview_data: [],
-              });
-            }, 500);
-          } else if (data.status === "Failed") {
-            evtSource.close();
-            setError(data.error || "Critical processing error");
-            setUploading(false);
-            setPhase("idle");
-          }
-        } catch (e) {
-          console.error("SSE Parse Error", e);
-        }
-      };
-
-      evtSource.onerror = (err) => {
-        console.error("SSE Error", err);
-        evtSource.close();
-        if (processProgress < 100) {
-          setError("Connection lost during processing");
-          setUploading(false);
-          setPhase("idle");
-        }
-      };
+      startSSE(batch_id.toString());
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred");
       setUploading(false);
       setPhase("idle");
     }
+  };
+
+  const startSSE = (batch_id: string) => {
+    const token = localStorage.getItem("auth_token");
+    const evtSource = new EventSource(
+      `http://localhost:8080/api/batches/${batch_id}/progress?token=${token}`
+    );
+
+    evtSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.total_rows > 0) {
+          const processed = data.processed_rows;
+          const total = data.total_rows;
+          const percent = Math.round((processed / total) * 100);
+
+          const now = Date.now();
+          const elapsedMs = now - processingStartTimeRef.current;
+
+          let speed = 0;
+          let eta = 0;
+
+          if (elapsedMs > 2000 && processed > 100) {
+            speed = (processed / (elapsedMs / 1000));
+            const remaining = total - processed;
+            eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
+          }
+
+          setProcessProgress(percent);
+          setMetrics(prev => ({
+            ...prev,
+            total,
+            processed,
+            success: data.filters?.success || 0,
+            failed: data.filters?.failed || 0,
+            speed: Math.round(speed),
+            eta
+          }));
+        }
+
+        if (data.status === "Completed") {
+          evtSource.close();
+          setProcessProgress(100);
+          setTimeout(() => {
+            onSuccess({
+              total_rows: data.total_rows,
+              success_rows: data.filters?.success || 0,
+              failed_rows: data.filters?.failed || 0,
+              result_id: batch_id,
+              preview_data: [],
+            });
+          }, 500);
+        } else if (data.status === "Failed") {
+          evtSource.close();
+          setError(data.error || "Critical processing error");
+          setUploading(false);
+          setPhase("idle");
+        }
+      } catch (e) {
+        console.error("SSE Parse Error", e);
+      }
+    };
+
+    evtSource.onerror = (err) => {
+      console.error("SSE Error", err);
+      evtSource.close();
+      if (processProgress < 100) {
+        setError("Connection lost during processing");
+        setUploading(false);
+        setPhase("idle");
+      }
+    };
   };
 
   const triggerFileInput = () => {
@@ -291,11 +327,20 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                   <div className="flex justify-between text-xs font-semibold">
                     <span className="flex items-center gap-1.5 grayscale">
                       <UploadCloud className="h-3.5 w-3.5" />
-                      {phase === "uploading" ? "1. Network Inbound" : "1. Upload Success"}
+                      {phase === "hashing"
+                        ? (
+                          <span className="flex items-center gap-1.5 text-primary">
+                            0. Scanning File Fingerprint...
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          </span>
+                        )
+                        : phase === "uploading"
+                          ? "1. Network Inbound"
+                          : "1. Upload Success"}
                     </span>
-                    <span className="font-mono">{phase === "uploading" ? `${uploadProgress}%` : "100%"}</span>
+                    <span className="font-mono">{phase === "uploading" ? `${uploadProgress}%` : phase === "hashing" ? "0%" : "100%"}</span>
                   </div>
-                  <Progress value={phase === "uploading" ? uploadProgress : 100} className="h-1" />
+                  <Progress value={phase === "uploading" ? uploadProgress : (phase === "hashing" ? 0 : 100)} className="h-1" />
                 </div>
 
                 {phase === "processing" && (
@@ -356,7 +401,11 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
           size="lg"
         >
           {uploading ? (
-            phase === "uploading" ? "Streaming to Storage..." : `Processing Record Pipeline...`
+            phase === "hashing"
+              ? "Generating Digital Signatures..."
+              : phase === "uploading"
+                ? "Streaming to Storage..."
+                : `Processing Record Pipeline...`
           ) : (
             <>
               <FileSpreadsheet className="mr-3 h-5 w-5" /> Initialize Data Pipeline

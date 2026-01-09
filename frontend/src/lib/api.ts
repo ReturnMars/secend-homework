@@ -128,10 +128,15 @@ export const api = {
   delete: <T>(url: string, options?: RequestOptions) => apiRequest<T>(url, { ...options, method: 'DELETE' }),
 
   /**
+   * Check if a file already exists by its hash (Instant Upload)
+   */
+  checkHash: (hash: string) => api.post<{ exists: boolean; batch_id?: number; status?: string }>("/upload/check", { hash }),
+
+  /**
    * Special method for file uploads with progress tracking
    * Uses XMLHttpRequest because Fetch API doesn't support upload progress
    */
-  upload: <T>(url: string, file: File, onProgress: (percent: number) => void): Promise<T> => {
+  upload: <T>(url: string, file: File, onProgress: (percent: number) => void, metadata?: { hash: string }): Promise<T> => {
     console.log(`[API] Starting upload to: ${url}`, file.name);
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -139,7 +144,6 @@ export const api = {
         ? url
         : `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
 
-      console.log(`[API] XHR Target URL: ${targetUrl}`);
       xhr.open("POST", targetUrl);
 
       // Auth header
@@ -160,7 +164,6 @@ export const api = {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const result = JSON.parse(xhr.responseText);
-            // Handle standard response unwrap
             if (result && typeof result === 'object' && 'code' in result) {
               if (result.code === 200) {
                 resolve(result.data as T);
@@ -186,6 +189,9 @@ export const api = {
       xhr.onerror = () => reject(new Error("Network error"));
 
       const formData = new FormData();
+      if (metadata?.hash) {
+        formData.append("hash", metadata.hash);
+      }
       formData.append("file", file);
       xhr.send(formData);
     });

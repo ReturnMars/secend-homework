@@ -37,22 +37,22 @@ type ImportBatch struct {
 // Record represents a single row from the CSV
 type Record struct {
 	ID       uint   `gorm:"primaryKey" json:"id"`
-	BatchID  uint   `gorm:"index:idx_batch_row" json:"batch_id"`
-	RowIndex int    `gorm:"index:idx_batch_row" json:"row_index"` // Original row number in CSV
+	BatchID  uint   `json:"batch_id"`
+	RowIndex int    `json:"row_index"` // Original row number in CSV
 	Name     string `gorm:"size:255" json:"name"`
 	Phone    string `gorm:"size:50" json:"phone"`
-	Date     string `gorm:"size:50" json:"date"` // Storing normalized string, or could be time.Time
+	Date     string `gorm:"size:50" json:"date"`
 
-	Address string `gorm:"size:255" json:"address"` // Original full address
+	Address string `gorm:"size:255" json:"address"`
 
 	// Location Fields
 	Province string `gorm:"size:100" json:"province"`
 	City     string `gorm:"size:100" json:"city"`
 	District string `gorm:"size:100" json:"district"`
 
-	Status       string `gorm:"size:50;index" json:"status"` // "Clean" or "Error"
+	Status       string `gorm:"size:50" json:"status"` // "Clean" or "Error"
 	ErrorMessage string `gorm:"type:text" json:"error_message"`
-	RawData      string `gorm:"type:text" json:"raw_data"` // Backup of original row JSON
+	RawData      string `gorm:"type:text" json:"raw_data"`
 }
 
 // RecordVersion tracks changes to a record

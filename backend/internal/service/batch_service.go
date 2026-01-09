@@ -17,10 +17,11 @@ func (s *CleanerService) CreateBatch(filename string, createdBy string, hash str
 	return batch, err
 }
 
-// FindBatchByHash 根据文件哈希查找已存在的批次
+// FindBatchByHash 根据文件哈希查找已存在的批次（物理去重模式）
 func (s *CleanerService) FindBatchByHash(hash string) (*model.ImportBatch, error) {
 	var batch model.ImportBatch
-	err := s.DB.Where("file_hash = ? AND status = ?", hash, model.BatchStatusCompleted).Order("created_at desc").First(&batch).Error
+	// 解除对 Status 的限制：只要文件物理 Hash 匹配，就认为持有该文件，跳过网络传输。
+	err := s.DB.Where("file_hash = ?", hash).Order("created_at desc").First(&batch).Error
 	if err != nil {
 		return nil, err
 	}

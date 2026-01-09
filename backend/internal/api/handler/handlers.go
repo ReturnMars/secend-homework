@@ -29,6 +29,42 @@ func NewCsvHandler(s *service.CleanerService) *CsvHandler {
 	return &CsvHandler{Service: s}
 }
 
+// CheckHash 检查文件 Hash 是否已上传过（物理秒传预检）
+func (h *CsvHandler) CheckHash(c *gin.Context) {
+	var body struct {
+		Hash string `json:"hash" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'hash' in request body"})
+		return
+	}
+
+	existingBatch, err := h.Service.FindBatchByHash(body.Hash)
+	if err == nil && existingBatch != nil {
+		// 关键加固：不仅检查数据库，还要检查物理文件是否真的还在 uploads 目录里
+		if _, err := os.Stat(existingBatch.FilePath); err == nil {
+			log.Printf("[Instant Check] Physical file exists for Hash %s. BatchID: %d", body.Hash, existingBatch.ID)
+
+			// 自动唤醒：如果处于 Pending/Failed/Processing 状态，重新拉起处理程序
+			if existingBatch.Status != model.BatchStatusCompleted {
+				log.Printf("[Instant Check] Batch %d not completed (%s). Awakening pipeline...", existingBatch.ID, existingBatch.Status)
+				h.Service.ProcessFileAsync(existingBatch.ID, existingBatch.FilePath)
+			}
+
+			utils.SuccessResponse(c, gin.H{
+				"exists":   true,
+				"batch_id": existingBatch.ID,
+				"status":   existingBatch.Status,
+			})
+			return
+		}
+		// 如果记录存在但文件离奇失踪，认为不存在，允许用户通过上传重新找回物理文件
+		log.Printf("[Instant Check] Record exists but physical file is missing: %s", existingBatch.FilePath)
+	}
+
+	utils.SuccessResponse(c, gin.H{"exists": false})
+}
+
 // Upload handles the CSV upload with streaming and de-duplication
 func (h *CsvHandler) Upload(c *gin.Context) {
 	mr, err := c.Request.MultipartReader()
@@ -60,6 +96,15 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 			return
 		}
 
+		// 处理 Hash 字段（由于前端调整了顺序，这个会先于 file 到达）
+		if part.FormName() == "hash" {
+			buf := new(strings.Builder)
+			io.Copy(buf, part)
+			fileHash = buf.String()
+			log.Printf("[Upload] Received fingerprint from client: %s", fileHash)
+			continue
+		}
+
 		if part.FormName() == "file" {
 			originalName = part.FileName()
 			// 先存为临时文件以计算哈希
@@ -86,18 +131,31 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 			}
 			dst.Close()
 
-			fileHash = hex.EncodeToString(hash.Sum(nil))
+			// 如果前端没提供 Hash，则回退到后端的全量哈希（向上兼容）
+			if fileHash == "" {
+				fileHash = hex.EncodeToString(hash.Sum(nil))
+			}
 
-			// 【临时关闭】哈希校验测试专用
-			/*
-				existing, _ := h.Service.FindBatchByHash(fileHash)
-				if existing != nil && existing.FilePath != "" {
-					os.Remove(tempPath)
-					savedPath = existing.FilePath
-					reused = true
-					log.Printf("[Upload] Duplicate file detected (Hash: %s), re-using: %s", fileHash, savedPath)
-				} else {
-			*/
+			existingBatch, err := h.Service.FindBatchByHash(fileHash)
+			if err == nil && existingBatch != nil {
+				os.Remove(tempPath) // Remove the temporary file as it's a duplicate
+				log.Printf("[Upload] Duplicate file detected (Hash: %s). Re-using existing batch %d.", fileHash, existingBatch.ID)
+
+				// 关键加固：如果该批次没处理完，利用秒传机会“唤醒”处理协程
+				if existingBatch.Status != model.BatchStatusCompleted {
+					log.Printf("[Upload] Batch %d is in state %s. Re-triggering processing pipeline...", existingBatch.ID, existingBatch.Status)
+					h.Service.ProcessFileAsync(existingBatch.ID, existingBatch.FilePath)
+				}
+
+				utils.SuccessResponse(c, gin.H{
+					"message":  "File already uploaded, re-using existing batch and ensuring processing.",
+					"batch_id": existingBatch.ID,
+					"status":   existingBatch.Status,
+					"reused":   true,
+				})
+				return
+			}
+
 			// 否则存为永久文件 (UUID + OriginalExt)
 			ext := filepath.Ext(originalName)
 			permanentFilename := fmt.Sprintf("%s%s", uuid.New().String(), ext)

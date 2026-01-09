@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,8 +77,11 @@ func (s *CleanerService) processFileStream(batchID uint, filePath string) error 
 		return fmt.Errorf("could not detect required columns (Name/Phone). Header was: %v", header)
 	}
 
-	// 5. 处理数据行
+	// 5. 极致性能：针对千万级数据，先卸载索引，写完后瞬间重建
+	repository.DropSearchIndexes()
 	stats, err := s.processRows(iter, batchID, indices)
+	repository.RebuildSearchIndexes()
+
 	if err != nil {
 		return err
 	}
@@ -121,11 +125,12 @@ type processStats struct {
 
 // processRows 采用高度并发的 Worker Pool 模式处理数据
 func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indices utils.ColIndices) (*processStats, error) {
-	const (
-		batchSize  = 2000 // 修正：Postgres 单条语句参数上限为 65535。13个字段 * 2000 = 26000，属于安全高效区间。
+	numWorkers := runtime.NumCPU() * 2 // 充分利用多核 CPU
+	if numWorkers < 8 {
 		numWorkers = 8
-	)
-	// numWorkers := runtime.NumCPU() * 2 // Original line, replaced by constant
+	}
+	const batchSize = 4000 // 极致调优：13 字段 * 4000 = 52000 < 65535
+
 	stats := &processStats{rowIdx: 1}
 
 	// 定义内部任务结构
@@ -135,8 +140,8 @@ func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indic
 	}
 
 	// Channel 定义，设置缓冲区以控制内存占用
-	taskChan := make(chan task, batchSize)
-	resultChan := make(chan model.Record, batchSize)
+	taskChan := make(chan task, 20000) // 增大缓冲区
+	resultChan := make(chan model.Record, 20000)
 	errChan := make(chan error, 1)
 
 	var wg sync.WaitGroup
@@ -160,22 +165,36 @@ func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indic
 		}()
 	}
 
-	// 2. 启动数据持久化协程 (IO 密集型)
+	// 2. 启动数据持久化协程 (方案 B：优化批量写入负载)
 	saveDone := make(chan struct{})
 	go func() {
 		defer close(saveDone)
-		var batch []model.Record
+		var batch []map[string]interface{}
+
 		for rec := range resultChan {
-			batch = append(batch, rec)
+			// 使用 map 存储以避开 GORM 对 Struct 的反射损耗
+			batch = append(batch, map[string]interface{}{
+				"batch_id":      rec.BatchID,
+				"row_index":     rec.RowIndex,
+				"name":          rec.Name,
+				"phone":         rec.Phone,
+				"date":          rec.Date,
+				"address":       rec.Address,
+				"province":      rec.Province,
+				"city":          rec.City,
+				"district":      rec.District,
+				"status":        rec.Status,
+				"error_message": rec.ErrorMessage,
+				"raw_data":      rec.RawData,
+			})
+
 			if len(batch) >= batchSize {
-				if err := s.DB.CreateInBatches(batch, batchSize).Error; err != nil {
-					select {
-					case errChan <- err:
-					default:
-					}
+				// 高速写入：直接操作 Table
+				if err := s.DB.Table("records").Create(batch).Error; err != nil {
+					log.Printf("[Saver] Bulk insert failed: %v", err)
 				}
-				// 调优：降低元数据更新频率。每 10000 行更新一次进度表，减少锁竞争。
-				currentProcessed := batch[len(batch)-1].RowIndex
+
+				currentProcessed := batch[len(batch)-1]["row_index"].(int)
 				if currentProcessed%10000 == 0 {
 					sCount := atomic.LoadInt64(&successCount)
 					fCount := atomic.LoadInt64(&failureCount)
@@ -192,7 +211,7 @@ func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indic
 			}
 		}
 		if len(batch) > 0 {
-			s.DB.CreateInBatches(batch, len(batch))
+			s.DB.Table("records").Create(batch)
 		}
 	}()
 

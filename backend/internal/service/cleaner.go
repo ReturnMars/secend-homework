@@ -9,6 +9,8 @@ import (
 var (
 	// regexPhone 匹配所有非数字字符，用于清理
 	regexPhone = regexp.MustCompile(`[^\d]`)
+	// regexDate 预编译日期格式正则以提升千万级处理速度
+	regexDate = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
 	// regexAddress 提取省市区的启发式正则
 	regexAddress = regexp.MustCompile(`^([^省]+省|[^自治区]+自治区|[^市]+市)([^市]+市|[^州]+州|[^县]+县|[^盟]+盟)?([^区]+区|[^县]+县|[^旗]+旗)?`)
 )
@@ -19,8 +21,15 @@ func CleanPhone(phone string) (string, error) {
 		return "", fmt.Errorf("empty phone")
 	}
 
-	// 1. 移除所有空白和非数字字符
-	cleaned := regexPhone.ReplaceAllString(phone, "")
+	// 高性能清理：由于每秒处理 5w+ 行，避开 regexp.ReplaceAllString 的分配负载，改用手写 Loop
+	var b strings.Builder
+	b.Grow(len(phone))
+	for i := 0; i < len(phone); i++ {
+		if phone[i] >= '0' && phone[i] <= '9' {
+			b.WriteByte(phone[i])
+		}
+	}
+	cleaned := b.String()
 
 	// 2. 处理常见的中国手机号前缀（+86 或 86）
 	if strings.HasPrefix(cleaned, "86") && len(cleaned) == 13 {
@@ -46,9 +55,8 @@ func CleanDate(dateStr string) (string, error) {
 	d = strings.ReplaceAll(d, ".", "-")
 	d = strings.TrimSpace(d)
 
-	// 检查是否符合 YYYY-MM-DD 这种最基本的形态
-	match, _ := regexp.MatchString(`^\d{4}-\d{1,2}-\d{1,2}$`, d)
-	if !match {
+	// 使用预编译正则：避免千万次重复编译
+	if !regexDate.MatchString(d) {
 		return d, fmt.Errorf("invalid format")
 	}
 
