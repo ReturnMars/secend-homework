@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Pencil, Download } from 'lucide-react';
+import { ArrowLeft, Pencil, Download, CheckCircle, AlertCircle } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import type { Batch } from './types';
 
 interface BatchHeaderProps {
     batch: Batch;
-    handleDownload: () => void;
+    handleDownload: (type?: 'clean' | 'error') => void;
     handleSaveBatchName: (name: string) => Promise<boolean | undefined>;
 }
 
@@ -101,8 +101,14 @@ export function BatchHeader({ batch, handleDownload, handleSaveBatchName }: Batc
                 </div>
             </div>
             <div className="flex gap-2">
-                <Button onClick={handleDownload}>
-                    <Download className="mr-2 h-4 w-4" /> Export Excel
+                <Button variant="outline" onClick={() => handleDownload('clean')}>
+                    <CheckCircle className="mr-2 h-4 w-4 text-green-500" /> Export Clean
+                </Button>
+                <Button variant="outline" className="hover:bg-red-50 hover:text-red-600 hover:border-red-200" onClick={() => handleDownload('error')}>
+                    <AlertCircle className="mr-2 h-4 w-4 text-red-500" /> Export Error Report
+                </Button>
+                <Button onClick={() => handleDownload()}>
+                    <Download className="mr-2 h-4 w-4" /> Full Export
                 </Button>
             </div>
         </div>

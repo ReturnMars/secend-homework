@@ -21,7 +21,7 @@ func (s *CleanerService) GetBatchFilename(batchID string) (string, error) {
 }
 
 // ExportBatchStream 将批次数据以 CSV 格式流式输出到 writer
-func (s *CleanerService) ExportBatchStream(batchID string, w io.Writer) error {
+func (s *CleanerService) ExportBatchStream(batchID string, filter string, w io.Writer) error {
 	// 写入 BOM 标记 (Excel UTF-8 兼容性)
 	w.Write([]byte("\xEF\xBB\xBF"))
 
@@ -34,12 +34,16 @@ func (s *CleanerService) ExportBatchStream(batchID string, w io.Writer) error {
 	}
 	cw.Flush()
 
-	// 从数据库流式读取记录
-	rows, err := s.DB.Model(&model.Record{}).
-		Where("batch_id = ?", batchID).
-		Order("row_index asc").
-		Rows()
+	// 核心逻辑：应用导出过滤器
+	query := s.DB.Model(&model.Record{}).Where("batch_id = ?", batchID)
+	switch filter {
+	case "clean":
+		query = query.Where("status = ?", "Clean")
+	case "error":
+		query = query.Where("status != ?", "Clean")
+	}
 
+	rows, err := query.Order("row_index asc").Rows()
 	if err != nil {
 		return err
 	}
@@ -73,7 +77,7 @@ func (s *CleanerService) ExportBatchStream(batchID string, w io.Writer) error {
 }
 
 // ExportBatchWithExcelStream 将批次数据以 Excel (xlsx) 格式流式输出
-func (s *CleanerService) ExportBatchWithExcelStream(batchID string, w io.Writer) error {
+func (s *CleanerService) ExportBatchWithExcelStream(batchID string, filter string, w io.Writer) error {
 	f := excelize.NewFile()
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -93,12 +97,16 @@ func (s *CleanerService) ExportBatchWithExcelStream(batchID string, w io.Writer)
 		return err
 	}
 
-	// 从数据库流式读取记录
-	rows, err := s.DB.Model(&model.Record{}).
-		Where("batch_id = ?", batchID).
-		Order("row_index asc").
-		Rows()
+	// 应用导出过滤器
+	query := s.DB.Model(&model.Record{}).Where("batch_id = ?", batchID)
+	switch filter {
+	case "clean":
+		query = query.Where("status = ?", "Clean")
+	case "error":
+		query = query.Where("status != ?", "Clean")
+	}
 
+	rows, err := query.Order("row_index asc").Rows()
 	if err != nil {
 		return err
 	}

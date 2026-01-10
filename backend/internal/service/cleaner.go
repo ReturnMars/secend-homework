@@ -50,12 +50,37 @@ func CleanDate(dateStr string) (string, error) {
 		return "", fmt.Errorf("empty date")
 	}
 
-	// 清理常见分隔符并统一使用短横线
-	d := strings.ReplaceAll(dateStr, "/", "-")
-	d = strings.ReplaceAll(d, ".", "-")
-	d = strings.TrimSpace(d)
+	d := strings.TrimSpace(dateStr)
 
-	// 使用预编译正则：避免千万次重复编译
+	// 1. 处理中文格式，如 "23年1月1日" 或 "2023年01月01日"
+	if strings.ContainsAny(d, "年月日") {
+		re := regexp.MustCompile(`(\d+)[年/-](\d+)[月/-](\d+)日?`)
+		matches := re.FindStringSubmatch(d)
+		if len(matches) == 4 {
+			year := matches[1]
+			month := matches[2]
+			day := matches[3]
+
+			// 处理 2 位年份补全
+			if len(year) == 2 {
+				year = "20" + year
+			}
+			// 补全月份和日期
+			if len(month) == 1 {
+				month = "0" + month
+			}
+			if len(day) == 1 {
+				day = "0" + day
+			}
+			d = fmt.Sprintf("%s-%s-%s", year, month, day)
+		}
+	}
+
+	// 2. 清理常见分隔符并统一使用短横线
+	d = strings.ReplaceAll(d, "/", "-")
+	d = strings.ReplaceAll(d, ".", "-")
+
+	// 3. 使用预编译正则验证最终格式
 	if !regexDate.MatchString(d) {
 		return d, fmt.Errorf("invalid format")
 	}

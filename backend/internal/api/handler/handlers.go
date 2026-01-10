@@ -250,11 +250,19 @@ func (h *CsvHandler) GetBatchRecords(c *gin.Context) {
 // ExportBatch downloads the processed CSV/Excel
 func (h *CsvHandler) ExportBatch(c *gin.Context) {
 	id := c.Param("id")
+	filter := c.Query("type") // compatible with frontend query naming if needed, or use 'filter'
 
 	downloadName, err := h.Service.GetBatchFilename(id)
 	if err != nil {
 		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// 根据过滤器调整文件名
+	if filter == "clean" {
+		downloadName = "Clean_" + downloadName
+	} else if filter == "error" {
+		downloadName = "Error_Report_" + downloadName
 	}
 
 	// Detect format based on extension
@@ -266,13 +274,13 @@ func (h *CsvHandler) ExportBatch(c *gin.Context) {
 	if isExcel {
 		// Excel Streaming
 		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-		if err := h.Service.ExportBatchWithExcelStream(id, c.Writer); err != nil {
+		if err := h.Service.ExportBatchWithExcelStream(id, filter, c.Writer); err != nil {
 			fmt.Printf("Export excel stream failed: %v\n", err)
 		}
 	} else {
 		// CSV Streaming (Default)
 		c.Header("Content-Type", "text/csv; charset=utf-8")
-		if err := h.Service.ExportBatchStream(id, c.Writer); err != nil {
+		if err := h.Service.ExportBatchStream(id, filter, c.Writer); err != nil {
 			fmt.Printf("Export csv stream failed: %v\n", err)
 		}
 	}

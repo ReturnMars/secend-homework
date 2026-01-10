@@ -21,12 +21,10 @@ export function useBatchData(id: string | undefined) {
         fetchBatchData();
     }, [fetchBatchData]);
 
-    const handleDownload = () => {
+    const handleDownload = (type?: 'clean' | 'error') => {
         if (!id || !batch) return;
-        
-        // Let backend decide the filename via Content-Disposition
-        api.download(`/batches/${id}/export`)
-           .catch(() => toast.error("Download failed"));
+        const url = type ? `/batches/${id}/export?type=${type}` : `/batches/${id}/export`;
+        api.download(url).catch(() => toast.error("Download failed"));
     };
 
     const handleSaveBatchName = async (name: string) => {
