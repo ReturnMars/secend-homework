@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { api } from "../lib/api";
+import { sha256 } from "js-sha256";
 
 export interface ProcessStats {
   total_rows: number;
@@ -135,21 +136,19 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
     setMetrics({ total: 0, processed: 0, success: 0, failed: 0, elapsed: 0, eta: 0, speed: 0 });
 
     try {
-      // 1. 生成极速指纹 (Fast Sampling)
-      // 针对 2GB 文件不再进行全量读取，而是采用“前 1MB + 后 1MB + 文件大小”的采样 Hash
-      const SAMPLE_SIZE = 1024 * 1024; // 1MB
-      const head = file.slice(0, SAMPLE_SIZE);
-      const tail = file.slice(Math.max(0, file.size - SAMPLE_SIZE));
-      const metaStr = `${file.size}-${file.lastModified}`;
-      const combinedBuffer = await new Blob([head, tail, new TextEncoder().encode(metaStr)]).arrayBuffer();
-
-      const hashBuffer = await crypto.subtle.digest("SHA-256", combinedBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      console.log("[Hash] Fast Fingerprint generated:", fileHash);
-
-      // 2. 秒传预检
+      // 1. 生成极速指纹 (针对 2GB 采样) - 使用 js-sha256 兼容非 HTTPS 环境
+      let fileHash = "";
       try {
+        const SAMPLE_SIZE = 1024 * 1024; // 1MB
+        const head = file.slice(0, SAMPLE_SIZE);
+        const tail = file.slice(Math.max(0, file.size - SAMPLE_SIZE));
+        const metaStr = `${file.size}-${file.lastModified}`;
+        const combinedBuffer = await new Blob([head, tail, new TextEncoder().encode(metaStr)]).arrayBuffer();
+
+        fileHash = sha256(combinedBuffer);
+        console.log("[Hash] Fast Fingerprint generated (Library):", fileHash);
+
+        // 2. 秒传预检 (仅在有 Hash 时执行)
         const checkRes = await api.checkHash(fileHash);
         if (checkRes && (checkRes as any).exists && (checkRes as any).batch_id) {
           console.log("[Instant Upload] File found on server.");
@@ -162,7 +161,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
           return;
         }
       } catch (checkErr) {
-        console.warn("[Instant Check] Proceeding with normal upload", checkErr);
+        console.warn("[Instant Check] Hash computation or check failed", checkErr);
       }
 
       // 3. 正常上传流程
@@ -187,10 +186,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
   };
 
   const startSSE = (batch_id: string) => {
-    const token = localStorage.getItem("auth_token");
-    const evtSource = new EventSource(
-      `http://localhost:8080/api/batches/${batch_id}/progress?token=${token}`
-    );
+    const evtSource = api.getProgressSource(batch_id);
 
     evtSource.onmessage = (event) => {
       try {

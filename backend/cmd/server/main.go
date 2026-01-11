@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 
 	"etl-tool/internal/api"
@@ -14,7 +15,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	// 2. Initialize Database
-	if err := repository.InitDB(cfg.DatabaseDSN); err != nil {
+	if err := repository.InitDB(cfg.GetDatabaseDSN()); err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
@@ -25,8 +26,9 @@ func main() {
 	r := api.SetupRouter(cleanerService)
 
 	// 5. Run Server
-	log.Printf("Server starting on port %s", cfg.ServerPort)
-	if err := r.Run(":" + cfg.ServerPort); err != nil {
+	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	log.Printf("Server starting on %s", addr)
+	if err := r.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

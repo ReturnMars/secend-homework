@@ -1,0 +1,27 @@
+# 🔍 生产环境后端镜像 (单二进制零依赖)
+FROM alpine:latest
+
+# 1. 安装必要的运行时依赖
+# ca-certificates: 用于 HTTPS 请求
+# tzdata: 用于正确处理时区 (Asia/Shanghai)
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+# 2. 从本地复制交叉编译出的 Linux 二进制文件
+# 注意：文件名需与您的部署工具构建出的文件名保持一致
+COPY backend/main-linux /app/server
+
+# 3. 如果有静态配置或迁移文件需要打包进镜像，可以在这里执行
+COPY backend/migrations /app/migrations
+
+# 4. 运行环境准备
+RUN chmod +x /app/server
+# 创建临时上传目录
+RUN mkdir -p /app/uploads
+
+# 5. 端口暴露
+EXPOSE 8080
+
+# 6. 启动
+CMD ["/app/server"]

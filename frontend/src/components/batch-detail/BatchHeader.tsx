@@ -1,9 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Pencil, Download, CheckCircle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Pencil, Download, CheckCircle, AlertCircle, ChevronDown } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ButtonGroup } from "@/components/ui/button-group";
 import type { Batch } from './types';
 
 interface BatchHeaderProps {
@@ -100,17 +107,52 @@ export function BatchHeader({ batch, handleDownload, handleSaveBatchName }: Batc
                     </div>
                 </div>
             </div>
-            <div className="flex gap-2">
-                <Button variant="outline" onClick={() => handleDownload('clean')}>
-                    <CheckCircle className="mr-2 h-4 w-4 text-green-500" /> Export Clean
+
+            {/* Modern Split Button Export */}
+            <ButtonGroup>
+                <Button
+                    variant="default"
+                    onClick={() => handleDownload()}
+                    className="h-9 px-4"
+                >
+                    <Download className="mr-2 h-4 w-4" /> Export All
                 </Button>
-                <Button variant="outline" className="hover:bg-red-50 hover:text-red-600 hover:border-red-200" onClick={() => handleDownload('error')}>
-                    <AlertCircle className="mr-2 h-4 w-4 text-red-500" /> Export Error Report
-                </Button>
-                <Button onClick={() => handleDownload()}>
-                    <Download className="mr-2 h-4 w-4" /> Full Export
-                </Button>
-            </div>
+
+                <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant="default"
+                            size="icon"
+                            className="h-9 w-9"
+                            aria-label="Export options"
+                        >
+                            <ChevronDown className="h-4 w-4" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuItem
+                            onClick={() => handleDownload('clean')}
+                            className="cursor-pointer py-2.5"
+                        >
+                            <CheckCircle className="mr-2 h-4 w-4 text-green-500" />
+                            <div className="flex flex-col gap-0.5">
+                                <span className="font-medium">Clean Data Only</span>
+                                <span className="text-[10px] text-muted-foreground leading-none">Validated records only</span>
+                            </div>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            onClick={() => handleDownload('error')}
+                            className="cursor-pointer py-2.5 text-destructive focus:text-destructive"
+                        >
+                            <AlertCircle className="mr-2 h-4 w-4 text-red-500" />
+                            <div className="flex flex-col gap-0.5">
+                                <span className="font-medium">Error Report</span>
+                                <span className="text-[10px] text-muted-foreground leading-none">Records with issues</span>
+                            </div>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </ButtonGroup>
         </div>
     );
 }

@@ -98,25 +98,29 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return children;
 }
 
+import { TooltipProvider } from "@/components/ui/tooltip";
+
 function App() {
   return (
     <Router>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/*"
-            element={
-              <RequireAuth>
-                <MainLayout>
-                  <ErrorBoundary>
-                    <AnimatedRoutes />
-                  </ErrorBoundary>
-                </MainLayout>
-              </RequireAuth>
-            }
-          />
-        </Routes>
+        <TooltipProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/*"
+              element={
+                <RequireAuth>
+                  <MainLayout>
+                    <ErrorBoundary>
+                      <AnimatedRoutes />
+                    </ErrorBoundary>
+                  </MainLayout>
+                </RequireAuth>
+              }
+            />
+          </Routes>
+        </TooltipProvider>
       </AuthProvider>
     </Router>
   );

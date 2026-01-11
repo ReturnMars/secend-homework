@@ -1,7 +1,6 @@
-import { toast } from "sonner";
 
 // Base API URL
-export const API_BASE_URL = "http://localhost:8080/api";
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string) || "/api";
 
 type RequestOptions = RequestInit & {
   // Allow passing parameters that are not part of RequestInit if needed in future
@@ -230,5 +229,11 @@ export const api = {
       console.error("Download Init Failed:", error);
       throw error;
     }
-  }
+  },
+
+  // 5. 获取进度 SSE 连接
+  getProgressSource(batchId: string): EventSource {
+    const token = localStorage.getItem("auth_token");
+    return new EventSource(`${API_BASE_URL}/batches/${batchId}/progress?token=${token}`);
+  },
 };

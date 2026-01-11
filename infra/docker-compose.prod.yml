@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # 1. 数据库服务 (持有持久化状态)
+  db:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: etl_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+    networks:
+      - app_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 2. 后端服务 (计算密集 & 内存密集型)
+  backend:
+    image: etl-tool-backend:latest
+    restart: always
+    environment:
+      - DATABASE_DSN=host=db user=postgres password=${DB_PASSWORD} dbname=etl_db port=5432 sslmode=disable TimeZone=Asia/Shanghai
+      - SERVER_PORT=8080
+      - GIN_MODE=release
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    networks:
+      - app_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # 3. 前端服务 (网关 & 静态分发)
+  frontend:
+    image: etl-tool-frontend:latest
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 100M
+    networks:
+      - app_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  pg_data:

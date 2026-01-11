@@ -1,5 +1,5 @@
-import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, CheckCircle, XCircle, Search, X } from 'lucide-react';
+import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,9 +21,12 @@ import {
     PaginationNext,
     PaginationPrevious,
 } from "@/components/ui/pagination";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Record } from './types';
-
-const MotionTableRow = motion(TableRow);
 
 interface RecordTableProps {
     records: Record[];
@@ -98,87 +101,104 @@ export function RecordTable({
                 </div>
             </CardHeader>
             <CardContent className="p-0">
-                <div className="relative min-h-[280px]">
-                    <Table>
-                        <TableHeader className="bg-muted/40 font-medium">
-                            <TableRow>
-                                <TableHead className="w-[60px] text-center">#</TableHead>
-                                <TableHead className="w-[140px]">Name</TableHead>
-                                <TableHead className="w-[140px]">Phone</TableHead>
-                                <TableHead className="w-[140px]">Date</TableHead>
-                                <TableHead>Location</TableHead>
-                                <TableHead className="w-[120px]">Status</TableHead>
-                                <TableHead className="w-[80px] text-right">Actions</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {loading ? (
+                <OverlayScrollbarsComponent
+                    options={{ scrollbars: { autoHide: 'scroll' } }}
+                    className="w-full"
+                >
+                    <div className="relative">
+                        <Table className="table-fixed">
+                            <TableHeader className="bg-muted/40 font-medium">
                                 <TableRow>
-                                    <TableCell colSpan={7} className="h-[400px] text-center">
-                                        <div className="flex flex-col items-center justify-center gap-3">
-                                            <div className="h-8 w-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
-                                            <p className="text-sm font-medium text-muted-foreground/80">Fetching records...</p>
-                                        </div>
-                                    </TableCell>
+                                    <TableHead className="w-[60px] text-center">#</TableHead>
+                                    <TableHead className="w-[120px]">Name</TableHead>
+                                    <TableHead className="w-[130px]">Phone</TableHead>
+                                    <TableHead className="w-[110px]">Date</TableHead>
+                                    <TableHead className="min-w-[200px]">Location</TableHead>
+                                    <TableHead className="w-[140px]">Status</TableHead>
+                                    <TableHead className="w-[90px] text-right">Actions</TableHead>
                                 </TableRow>
-                            ) : records.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={7} className="h-[400px] text-center text-muted-foreground">
-                                        No records found for this filter.
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                <AnimatePresence mode="popLayout">
-                                    {records.map((record) => (
-                                        <MotionTableRow
-                                            key={record.id}
-                                            initial={{ opacity: 0, y: 4 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            exit={{ opacity: 0, scale: 0.95 }}
-                                            className="group"
-                                            layout
-                                        >
-                                            <TableCell className="text-center text-muted-foreground font-mono text-xs w-[60px]">{record.row_index}</TableCell>
-                                            <TableCell className="font-medium text-foreground/90 w-[120px]">{record.name}</TableCell>
-                                            <TableCell className="text-foreground/80 w-[130px]">{record.phone}</TableCell>
-                                            <TableCell className="text-foreground/80 w-[110px]">{record.date || '-'}</TableCell>
-                                            <TableCell className="text-muted-foreground/70 text-xs">
-                                                <div className="truncate max-w-[200px]" title={[record.province, record.city, record.district].filter(Boolean).join(' ')}>
-                                                    {[record.province, record.city, record.district].filter(Boolean).join(' ')}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="w-[120px]">
-                                                {record.status === 'Clean' ? (
-                                                    <Badge variant="outline" className="bg-green-50/50 text-green-700 border-green-200/60 shadow-none font-medium h-5 px-1.5 text-[10px]">
-                                                        <CheckCircle className="mr-1 h-2.5 w-2.5" /> Valid
-                                                    </Badge>
-                                                ) : (
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <Badge variant="destructive" className="w-fit shadow-none font-medium h-5 px-1.5 text-[10px]">
-                                                            <XCircle className="mr-1 h-2.5 w-2.5" /> Invalid
+                            </TableHeader>
+                            <TableBody>
+                                {loading ? (
+                                    <TableRow>
+                                        <TableCell colSpan={7} className="h-[400px] text-center">
+                                            <div className="flex flex-col items-center justify-center gap-3">
+                                                <div className="h-8 w-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
+                                                <p className="text-sm font-medium text-muted-foreground/80">Fetching records...</p>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ) : records.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={7} className="h-[400px] text-center text-muted-foreground">
+                                            No records found for this filter.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    records.map((record) => {
+                                        const fullLocation = [record.province, record.city, record.district].filter(Boolean).join(' ');
+                                        const nameWithLorem = `${record.name} lorem ipsum dolor sit amet consectetur adipiscing elit`;
+
+                                        return (
+                                            <TableRow key={record.id}>
+                                                <TableCell className="text-center text-muted-foreground font-mono text-xs">{record.row_index}</TableCell>
+                                                <TableCell className="font-medium text-foreground/90">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="truncate cursor-help">{nameWithLorem}</div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="max-w-[400px] whitespace-normal break-words bg-popover/95 backdrop-blur-sm">
+                                                            <p className="leading-relaxed">{nameWithLorem}</p>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </TableCell>
+                                                <TableCell className="text-foreground/80">{record.phone}</TableCell>
+                                                <TableCell className="text-foreground/80">{record.date || '-'}</TableCell>
+                                                <TableCell className="text-foreground/80">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="truncate w-full cursor-help">{fullLocation}</div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent className="max-w-[400px] whitespace-normal break-all bg-popover/95 backdrop-blur-sm">
+                                                            <p className="leading-relaxed">{fullLocation}</p>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </TableCell>
+                                                <TableCell>
+                                                    {record.status === 'Clean' ? (
+                                                        <Badge variant="outline" className="bg-green-50/50 text-green-700 border-green-200/60 shadow-none font-medium h-5 px-1.5 text-[10px]">
+                                                            <CheckCircle className="mr-1 h-2.5 w-2.5" /> Valid
                                                         </Badge>
-                                                        <span className="text-[10px] leading-tight text-red-500/60 line-clamp-1" title={record.error_message}>
-                                                            {record.error_message}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-right w-[90px]">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleEditClick(record)}
-                                                >
-                                                    Edit
-                                                </Button>
-                                            </TableCell>
-                                        </MotionTableRow>
-                                    ))}
-                                </AnimatePresence>
-                            )}
-                        </TableBody>
-                    </Table>
-                </div>
+                                                    ) : (
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Badge variant="destructive" className="w-fit shadow-none font-medium h-5 px-1.5 text-[10px] cursor-help">
+                                                                    <XCircle className="mr-1 h-2.5 w-2.5" /> Invalid
+                                                                </Badge>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="max-w-[300px] whitespace-normal break-words  text-destructive-foreground/80 ">
+                                                                <p className="leading-relaxed font-medium text-destructive">{record.error_message}</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => handleEditClick(record)}
+                                                    >
+                                                        Edit
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </OverlayScrollbarsComponent>
 
                 {/* Pagination */}
                 <div className="pt-2 border-t">

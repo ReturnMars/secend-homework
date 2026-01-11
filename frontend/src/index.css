@@ -1,4 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* 引入 OverlayScrollbars 核心样式 */
+@import 'overlayscrollbars/overlayscrollbars.css';
 
 @import "tailwindcss";
 
@@ -118,8 +120,12 @@
 }
 
 @layer base {
-  html {
-    scrollbar-gutter: stable;
+
+  /* 彻底清理原生滚动条样式，交给 OverlayScrollbars 接管 */
+  html,
+  body {
+    height: 100%;
+    overflow: hidden !important;
   }
 
   * {
@@ -128,5 +134,24 @@
 
   body {
     @apply bg-background text-foreground;
+    padding-right: 0px !important;
   }
+
+  /* 拦截 Radix UI 偏移逻辑 */
+  [data-scroll-locked] {
+    --removed-body-scroll-bar-size: 0px !important;
+  }
+}
+
+/* 自定义 OverlayScrollbars 主题，匹配 Shadcn UI */
+.os-theme-dark,
+.os-theme-light {
+  --os-size: 6px;
+  --os-padding-perpendicular: 2px;
+  --os-padding-axis: 2px;
+  --os-track-bg: transparent;
+  --os-handle-bg: oklch(0.556 0 0 / 30%);
+  --os-handle-bg-hover: oklch(0.556 0 0 / 50%);
+  --os-handle-bg-active: oklch(0.556 0 0 / 70%);
+  --os-handle-border-radius: 10px;
 }

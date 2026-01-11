@@ -1,0 +1,16 @@
+# 🔍 生产环境前端镜像 (极简托管)
+# 这里假设您本地已经执行了 pnpm build，产出了 dist 目录
+FROM nginx:alpine
+
+# 1. 复制自定义 Nginx 配置
+COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
+
+# 2. 复制构建完成的静态文件
+# 路径相对于 deployer 执行 docker build 的目录
+COPY frontend/dist /usr/share/nginx/html
+
+# 3. 端口暴露
+EXPOSE 80
+
+# 4. 启动启动
+CMD ["nginx", "-g", "daemon off;"]

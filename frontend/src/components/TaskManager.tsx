@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Card } from "@/components/ui/card";
 import clsx from "clsx";
 import { Button } from "./ui/button";
+import { api } from "../lib/api";
 
 interface TaskItemProps {
     batchId: string;
@@ -29,10 +30,7 @@ const TaskItem: React.FC<TaskItemProps> = ({ batchId, fileName, onFinished }) =>
     const startTimeRef = useRef<number>(Date.now());
 
     useEffect(() => {
-        const token = localStorage.getItem("auth_token");
-        const evtSource = new EventSource(
-            `http://localhost:8080/api/batches/${batchId}/progress?token=${token}`
-        );
+        const evtSource = api.getProgressSource(batchId);
 
         evtSource.onmessage = (event) => {
             try {
