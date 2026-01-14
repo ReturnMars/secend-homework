@@ -7,14 +7,22 @@ import type { Batch } from '../types';
 export function useBatchData(id: string | undefined) {
     const [batch, setBatch] = useState<Batch | null>(null);
 
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+
     const fetchBatchData = useCallback(async () => {
         if (!id) return;
+        setLoading(true);
+        setError(null);
         try {
             const data = await api.get<Batch>(`/batches/${id}`);
             setBatch(data);
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
+            setError(err);
             // Optional: toast.error("Failed to load batch data");
+        } finally {
+            setLoading(false);
         }
     }, [id]);
 
@@ -52,6 +60,8 @@ export function useBatchData(id: string | undefined) {
     return {
         batch,
         setBatch,
+        loading,
+        error,
         handleDownload,
         handleSaveBatchName,
         handlePause,

@@ -1,7 +1,9 @@
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+
+import { Button } from "../components/ui/button";
 
 // Internal Components
 import { BatchHeader } from "../components/batch-detail/BatchHeader";
@@ -44,6 +46,8 @@ export default function BatchDetail() {
     handleResume,
     handleCancel,
     refreshBatch,
+    loading: batchLoading,
+    error: batchError,
   } = useBatchData(id);
 
   const {
@@ -91,10 +95,27 @@ export default function BatchDetail() {
     handleUpdateReason,
   } = useRecordEditor(form, refreshRecords, refreshBatch);
 
-  if (!batch)
+  if (batchLoading)
     return (
       <div className="p-10 text-center text-muted-foreground animate-pulse">
         Loading batch data...
+      </div>
+    );
+
+  if (batchError || !batch)
+    return (
+      <div className="container max-w-screen-2xl mx-auto py-8 px-4 sm:px-8">
+        <div className="flex flex-col items-center justify-center p-10 space-y-4 border rounded-lg bg-background/50">
+          <div className="text-xl font-semibold text-destructive">
+            Batch Not Found
+          </div>
+          <p className="text-muted-foreground">
+            The requested batch could not be found or has been deleted.
+          </p>
+          <Button asChild variant="outline" className="mt-4">
+            <Link to="/">Back to Dashboard</Link>
+          </Button>
+        </div>
       </div>
     );
 

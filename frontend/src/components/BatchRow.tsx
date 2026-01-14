@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FileSpreadsheet,
@@ -42,7 +42,6 @@ export const BatchRow: React.FC<BatchRowProps> = ({
     eta: 0,
   });
 
-  const startTimeRef = useRef<number>(Date.now());
   const { handlePause, handleResume, handleCancel, isActionLoading } =
     useBatchActions(initialBatch.id.toString(), () => {
       if (onStatusChange) onStatusChange();
@@ -71,17 +70,16 @@ export const BatchRow: React.FC<BatchRowProps> = ({
         setStatus(data.status);
 
         if (data.total_rows > 0) {
+          console.log(data);
           const processed = data.processed_rows;
           const total = data.total_rows;
           const percent = Math.round((processed / total) * 100);
 
-          const now = Date.now();
-          const elapsedSec = (now - startTimeRef.current) / 1000;
-          let speed = 0;
+          // 直接使用后端推送的实时速度
+          const speed = data.speed || 0;
           let eta = 0;
 
-          if (elapsedSec > 2 && processed > 100) {
-            speed = Math.round(processed / elapsedSec);
+          if (speed > 0) {
             eta = Math.ceil((total - processed) / speed);
           }
 

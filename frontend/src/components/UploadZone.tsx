@@ -232,16 +232,13 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
           const total = data.total_rows;
           const percent = Math.round((processed / total) * 100);
 
-          const now = Date.now();
-          const elapsedMs = now - processingStartTimeRef.current;
-
-          let speed = 0;
+          // 直接使用后端推送的实时速度
+          const speed = data.speed || 0;
           let eta = 0;
 
-          if (elapsedMs > 2000 && processed > 100) {
-            speed = processed / (elapsedMs / 1000);
+          if (speed > 0) {
             const remaining = total - processed;
-            eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
+            eta = Math.ceil(remaining / speed);
           }
 
           setProcessProgress(percent);
@@ -437,61 +434,79 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                     </div>
 
                     <div className="space-y-3 pt-2">
-                      <div className="flex justify-between items-end">
+                      {/* Row 1: Title & Controls */}
+                      <div className="flex justify-between items-center h-8">
                         <span className="flex items-center gap-2 text-xs font-bold text-primary">
                           <CheckCircle2 className="h-4 w-4" />
                           2. ETL Pipeline Processing
                         </span>
-                        <div className="flex gap-2 text-[10px] items-center">
-                          {/* Task Controls */}
-                          <div className="flex items-center gap-1 mr-2 border-r pr-2 border-border/50">
-                            {(status === "Processing" ||
-                              status === "Pending") && (
-                              <button
-                                onClick={handlePause}
-                                disabled={isActionLoading}
-                                className="p-1.5 hover:bg-amber-500/10 text-amber-600 rounded-md transition-colors disabled:opacity-50"
-                                title="Pause"
-                              >
-                                {isActionLoading ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Pause className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                            )}
-                            {status === "Paused" && (
-                              <button
-                                onClick={handleResume}
-                                disabled={isActionLoading}
-                                className="p-1.5 hover:bg-green-500/10 text-green-600 rounded-md transition-colors disabled:opacity-50"
-                                title="Resume"
-                              >
-                                {isActionLoading ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <Play className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                            )}
-                            {(status === "Processing" ||
-                              status === "Pending" ||
-                              status === "Paused") && (
-                              <button
-                                onClick={handleCancel}
-                                disabled={isActionLoading}
-                                className="p-1.5 hover:bg-red-500/10 text-destructive rounded-md transition-colors disabled:opacity-50"
-                                title="Cancel"
-                              >
-                                {isActionLoading ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Square className="h-3 w-3 fill-current" />
-                                )}
-                              </button>
-                            )}
-                          </div>
 
+                        {/* Controls */}
+                        <div className="flex items-center gap-1">
+                          {(status === "Processing" ||
+                            status === "Pending") && (
+                            <button
+                              onClick={handlePause}
+                              disabled={isActionLoading}
+                              className="p-1.5 hover:bg-amber-500/10 text-amber-600 rounded-md transition-colors disabled:opacity-50"
+                              title="Pause"
+                            >
+                              {isActionLoading ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Pause className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          )}
+                          {status === "Paused" && (
+                            <button
+                              onClick={handleResume}
+                              disabled={isActionLoading}
+                              className="p-1.5 hover:bg-green-500/10 text-green-600 rounded-md transition-colors disabled:opacity-50"
+                              title="Resume"
+                            >
+                              {isActionLoading ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          )}
+                          {(status === "Processing" ||
+                            status === "Pending" ||
+                            status === "Paused") && (
+                            <button
+                              onClick={handleCancel}
+                              disabled={isActionLoading}
+                              className="p-1.5 hover:bg-red-500/10 text-destructive rounded-md transition-colors disabled:opacity-50"
+                              title="Cancel"
+                            >
+                              {isActionLoading ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Square className="h-3 w-3 fill-current" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Row 2: Progress Bar & Percentage */}
+                      <div className="flex items-center gap-3">
+                        <Progress
+                          value={processProgress}
+                          className="h-2.5 flex-1"
+                        />
+                        <span className="text-xs font-mono font-bold w-[3rem] text-right">
+                          {processProgress}%
+                        </span>
+                      </div>
+
+                      {/* Row 3: Stats (Processed & Time) */}
+                      <div className="flex justify-between items-center text-[11px] font-mono font-medium text-muted-foreground/80">
+                        <span>{metrics.processed.toLocaleString()} rows</span>
+
+                        <div className="flex items-center gap-2">
                           <div className="flex items-center gap-1.5 bg-muted px-2 py-1 rounded-md min-w-[70px]">
                             <Clock className="h-3 w-3" />
                             <span className="font-mono font-bold">
@@ -504,7 +519,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                           </div>
                           <div className="flex items-center gap-1.5 bg-primary text-primary-foreground px-2 py-1 rounded-md min-w-[100px]">
                             <span className="opacity-70 text-[8px] uppercase font-black">
-                              {processProgress === 100 ? "Status" : "ETA"}
+                              ETA
                             </span>
                             <span className="font-mono font-bold leading-none">
                               {processProgress === 100
@@ -517,11 +532,6 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                             </span>
                           </div>
                         </div>
-                      </div>
-                      <Progress value={processProgress} className="h-2.5" />
-                      <div className="flex justify-between text-[11px] font-mono font-medium text-muted-foreground/60">
-                        <span>{metrics.processed.toLocaleString()} rows</span>
-                        <span>{processProgress}%</span>
                       </div>
                     </div>
                   </div>

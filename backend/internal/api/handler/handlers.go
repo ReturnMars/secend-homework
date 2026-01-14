@@ -309,13 +309,24 @@ func (h *CsvHandler) StreamBatchProgress(c *gin.Context) {
 				Success int `json:"success"`
 				Failed  int `json:"failed"`
 			} `json:"filters"`
-			Error string `json:"error,omitempty"`
+			Error string  `json:"error,omitempty"`
+			Speed float64 `json:"speed"` // 实时处理速度 (rows/sec)
+		}
+
+		// Inject real-time speed from memory
+		var currentSpeed float64
+		// Parse Batch ID to uint
+		var bid uint
+		fmt.Sscanf(id, "%d", &bid)
+		if batch.Status == "Processing" {
+			currentSpeed = h.Service.GetBatchSpeed(bid)
 		}
 
 		data := Progress{
 			Status:        string(batch.Status),
 			ProcessedRows: batch.ProcessedRows,
 			TotalRows:     batch.TotalRows,
+			Speed:         currentSpeed,
 		}
 		data.Filters.Success = batch.SuccessCount
 		data.Filters.Failed = batch.FailureCount

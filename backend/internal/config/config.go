@@ -8,15 +8,18 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+var AppConfig *Config
+
 type Config struct {
 	Database struct {
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Name     string `yaml:"name"`
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
-		SSLMode  string `yaml:"ssl_mode"`
-		TimeZone string `yaml:"timezone"`
+		User                   string `yaml:"user"`
+		Password               string `yaml:"password"`
+		Name                   string `yaml:"name"`
+		Host                   string `yaml:"host"`
+		Port                   int    `yaml:"port"`
+		SSLMode                string `yaml:"ssl_mode"`
+		TimeZone               string `yaml:"timezone"`
+		BatchInsertConcurrency int    `yaml:"batch_insert_concurrency"`
 	} `yaml:"database"`
 	Server struct {
 		Port      int    `yaml:"port"`
@@ -50,7 +53,9 @@ func LoadConfig() *Config {
 	c.Database.Host = "localhost"
 	c.Database.Port = 5436
 	c.Database.SSLMode = "disable"
+	c.Database.SSLMode = "disable"
 	c.Database.TimeZone = "Asia/Shanghai"
+	c.Database.BatchInsertConcurrency = 2
 
 	// 2. 确定当前环境
 	env := os.Getenv("APP_ENV")
@@ -105,5 +110,6 @@ func LoadConfig() *Config {
 	}
 
 	log.Printf("[Config] Server config initialized. Env: %s, Mode: %s, Port: %d", env, c.Server.Mode, c.Server.Port)
+	AppConfig = c
 	return c
 }

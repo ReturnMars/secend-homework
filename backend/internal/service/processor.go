@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"etl-tool/internal/config"
 	"etl-tool/internal/model"
 	"etl-tool/internal/repository"
 	"etl-tool/internal/utils"
@@ -24,8 +25,10 @@ var (
 )
 
 // CleanerService 是核心服务，提供数据清洗和处理功能
+// CleanerService 是核心服务，提供数据清洗和处理功能
 type CleanerService struct {
-	DB *gorm.DB
+	DB          *gorm.DB
+	batchSpeeds sync.Map // 存储实时处理速度 (key: batchID, value: float64)
 }
 
 // NewCleanerService 创建一个新的 CleanerService 实例
@@ -221,54 +224,81 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 		}()
 	}
 
-	// 2. 启动数据持久化协程 (方案 B：优化批量写入负载)
+	// 2. 启动多个数据持久化协程 (并发写入)
+	numSavers := config.AppConfig.Database.BatchInsertConcurrency
+	if numSavers <= 0 {
+		numSavers = 2 // 默认兜底值
+	}
+	var saverWg sync.WaitGroup
 	saveDone := make(chan struct{})
+
+	// 启动进度监控协程 (避免多个 Saver 竞争更新数据库)
+	monitorDone := make(chan struct{})
 	go func() {
-		defer close(saveDone)
-		var batch []map[string]interface{}
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		defer close(monitorDone)
 
-		for rec := range resultChan {
-			// 使用 map 存储以避开 GORM 对 Struct 的反射损耗
-			batch = append(batch, map[string]interface{}{
-				"batch_id":      rec.BatchID,
-				"row_index":     rec.RowIndex,
-				"name":          rec.Name,
-				"phone":         rec.Phone,
-				"date":          rec.Date,
-				"address":       rec.Address,
-				"province":      rec.Province,
-				"city":          rec.City,
-				"district":      rec.District,
-				"status":        rec.Status,
-				"error_message": rec.ErrorMessage,
-				"raw_data":      rec.RawData,
-			})
+		for {
+			select {
+			case <-ticker.C:
+				sCount := atomic.LoadInt64(&successCount)
+				fCount := atomic.LoadInt64(&failureCount)
+				stats.rowIdx = int(sCount + fCount) // 估算当前总进度
 
-			if len(batch) >= batchSize {
-				// 高速写入：直接操作 Table
-				if err := s.DB.Table("records").Create(batch).Error; err != nil {
-					log.Printf("[Saver] Bulk insert failed: %v", err)
-				}
-
-				currentProcessed := batch[len(batch)-1]["row_index"].(int)
-				if currentProcessed%10000 == 0 {
-					sCount := atomic.LoadInt64(&successCount)
-					fCount := atomic.LoadInt64(&failureCount)
-					go func(idx int, sc, fc int64) {
-						s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
-							Updates(map[string]interface{}{
-								"processed_rows": idx,
-								"success_count":  int(sc),
-								"failure_count":  int(fc),
-							})
-					}(currentProcessed, sCount, fCount)
-				}
-				batch = nil
+				s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+					Updates(map[string]interface{}{
+						"processed_rows": stats.rowIdx,
+						"success_count":  int(sCount),
+						"failure_count":  int(fCount),
+					})
+			case <-saveDone: // 所有 Saver 完成后退出
+				return
 			}
 		}
-		if len(batch) > 0 {
-			s.DB.Table("records").Create(batch)
-		}
+	}()
+
+	for i := 0; i < numSavers; i++ {
+		saverWg.Add(1)
+		go func() {
+			defer saverWg.Done()
+			var batch []map[string]interface{}
+
+			for rec := range resultChan {
+				// 使用 map 存储以避开 GORM 对 Struct 的反射损耗
+				batch = append(batch, map[string]interface{}{
+					"batch_id":      rec.BatchID,
+					"row_index":     rec.RowIndex,
+					"name":          rec.Name,
+					"phone":         rec.Phone,
+					"date":          rec.Date,
+					"address":       rec.Address,
+					"province":      rec.Province,
+					"city":          rec.City,
+					"district":      rec.District,
+					"status":        rec.Status,
+					"error_message": rec.ErrorMessage,
+					"raw_data":      rec.RawData,
+				})
+
+				if len(batch) >= batchSize {
+					// 高速写入：直接操作 Table
+					if err := s.DB.Table("records").Create(batch).Error; err != nil {
+						log.Printf("[Saver] Bulk insert failed: %v", err)
+					}
+					batch = nil
+				}
+			}
+			if len(batch) > 0 {
+				s.DB.Table("records").Create(batch)
+			}
+		}()
+	}
+
+	// 专门的协程等待所有 Saver 完成，然后关闭 monitor
+	go func() {
+		saverWg.Wait()
+		close(saveDone)
 	}()
 
 	// 3. 生产者：读取文件并分发任务
@@ -293,7 +323,9 @@ Loop:
 		// 每 100 万行打印一次实时吞吐量
 		if stats.rowIdx%1000000 == 0 {
 			elapsed := time.Since(lastLogTime)
-			log.Printf("[Performance] Processed 1,000,000 rows, current speed: %.2f rows/sec", 1000000/elapsed.Seconds())
+			bps := float64(1000000) / elapsed.Seconds()
+			log.Printf("[Performance] Processed 1,000,000 rows, current speed: %.2f rows/sec", bps)
+			s.batchSpeeds.Store(batchID, bps)
 			lastLogTime = time.Now()
 		}
 
@@ -432,4 +464,12 @@ func (s *CleanerService) CancelBatch(batchID uint) error {
 
 	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 		Update("status", model.BatchStatusCancelled).Error
+}
+
+// GetBatchSpeed 获取指定批次当前的实时处理速度
+func (s *CleanerService) GetBatchSpeed(batchID uint) float64 {
+	if val, ok := s.batchSpeeds.Load(batchID); ok {
+		return val.(float64)
+	}
+	return 0
 }
