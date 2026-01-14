@@ -36,8 +36,15 @@ export default function BatchDetail() {
   const { id } = useParams<{ id: string }>();
 
   // Init Logic Hooks
-  const { batch, handleDownload, handleSaveBatchName, refreshBatch } =
-    useBatchData(id);
+  const {
+    batch,
+    handleDownload,
+    handleSaveBatchName,
+    handlePause,
+    handleResume,
+    handleCancel,
+    refreshBatch,
+  } = useBatchData(id);
 
   const {
     records,
@@ -97,6 +104,9 @@ export default function BatchDetail() {
         batch={batch}
         handleDownload={handleDownload}
         handleSaveBatchName={handleSaveBatchName}
+        handlePause={handlePause}
+        handleResume={handleResume}
+        handleCancel={handleCancel}
       />
 
       <StatsCards batch={batch} />

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from "sonner";
 import { api } from "../../../lib/api";
+import { useBatchActions } from "../../../hooks/useBatchActions";
 import type { Batch } from '../types';
 
 export function useBatchData(id: string | undefined) {
@@ -20,6 +21,13 @@ export function useBatchData(id: string | undefined) {
     useEffect(() => {
         fetchBatchData();
     }, [fetchBatchData]);
+
+    const {
+        handlePause,
+        handleResume,
+        handleCancel,
+        isActionLoading
+    } = useBatchActions(id, fetchBatchData);
 
     const handleDownload = (type?: 'clean' | 'error') => {
         if (!id || !batch) return;
@@ -46,6 +54,10 @@ export function useBatchData(id: string | undefined) {
         setBatch,
         handleDownload,
         handleSaveBatchName,
+        handlePause,
+        handleResume,
+        handleCancel,
+        isActionLoading,
         refreshBatch: fetchBatchData
     };
 }

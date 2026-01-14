@@ -1,16 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import {
-  FileSpreadsheet,
-  Plus,
-  Activity,
-  Clock,
-  ChevronRight,
-} from "lucide-react";
+import { FileSpreadsheet, Plus, Activity, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Drawer,
   DrawerClose,
@@ -22,7 +15,7 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer";
 import UploadZone from "../components/UploadZone";
-import TaskManager from "../components/TaskManager";
+import { BatchRow } from "../components/BatchRow";
 
 interface Batch {
   id: number;
@@ -36,7 +29,6 @@ interface Batch {
 export default function Dashboard() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [activeTasks, setActiveTasks] = useState<{ id: string; name: string }[]>([]);
   const navigate = useNavigate();
 
   const fetchBatches = async () => {
@@ -44,16 +36,6 @@ export default function Dashboard() {
       const data = await api.get<Batch[]>("/batches");
       if (Array.isArray(data)) {
         setBatches(data);
-        // 自动发现所有活动任务
-        const ongoing = data
-          .filter(b => b.status === "Processing" || b.status === "Pending")
-          .map(b => ({ id: b.id.toString(), name: b.original_filename }));
-
-        setActiveTasks(prev => {
-          const existingIds = prev.map(t => t.id);
-          const newTasks = ongoing.filter(o => !existingIds.includes(o.id));
-          return [...prev, ...newTasks];
-        });
       }
     } catch (err) {
       console.error("Dashboard fetch error:", err);
@@ -62,23 +44,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchBatches();
-    // 轮询列表中批次的基本状态
+    // 轮询列表中批次的基本状态，主要为了发现新上传的记录
     const timer = setInterval(fetchBatches, 10000);
     return () => clearInterval(timer);
   }, []);
 
-  const handleTaskStarted = (id: string, name: string) => {
-    setActiveTasks(prev => {
-      if (prev.some(t => t.id === id)) return prev;
-      return [...prev, { id, name }];
-    });
-  };
-
-  const handleUploadSuccess = (stats: any, fileName?: string) => {
+  const handleUploadSuccess = () => {
     setIsUploadOpen(false);
-    if (stats.batch_id || stats.result_id) {
-      handleTaskStarted(String(stats.batch_id || stats.result_id), fileName || "Unknown File");
-    }
+    fetchBatches();
   };
 
   return (
@@ -105,10 +78,7 @@ export default function Dashboard() {
                 </DrawerDescription>
               </DrawerHeader>
               <div className="p-4 pb-0">
-                <UploadZone
-                  onSuccess={handleUploadSuccess}
-                  onTaskStarted={handleTaskStarted}
-                />
+                <UploadZone onSuccess={handleUploadSuccess} />
               </div>
               <DrawerFooter>
                 <DrawerClose asChild>
@@ -197,18 +167,18 @@ export default function Dashboard() {
             <div className="text-3xl font-bold text-foreground tracking-tighter">
               {batches.length > 0
                 ? new Date(batches[0].created_at).toLocaleDateString(
-                  undefined,
-                  { month: "short", day: "numeric" }
-                )
+                    undefined,
+                    { month: "short", day: "numeric" }
+                  )
                 : "-"}
             </div>
             <div className="flex items-center text-xs text-muted-foreground mt-2">
               <span className="opacity-80">
                 {batches.length > 0
                   ? new Date(batches[0].created_at).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
                   : "No imports yet"}
               </span>
             </div>
@@ -239,92 +209,21 @@ export default function Dashboard() {
                 <th className="py-3 px-4 w-[40%] pl-6 font-medium">
                   Batch Identifier
                 </th>
-                <th className="py-3 px-4 font-medium">Progress</th>
-                <th className="py-3 px-4 font-medium">Status</th>
+                <th className="py-3 px-4 font-medium">
+                  Progress & Performance
+                </th>
+                <th className="py-3 px-4 font-medium">Status & Control</th>
                 <th className="py-3 px-4 text-right font-medium">Date</th>
                 <th className="py-3 px-4 w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
               {batches.map((batch) => (
-                <tr
+                <BatchRow
                   key={batch.id}
-                  className="group hover:bg-muted/40 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/batches/${batch.id}`)}
-                >
-                  <td className="py-3 px-4 pl-6">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 shrink-0 group-hover:scale-105 transition-transform">
-                        <FileSpreadsheet className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <div className="font-medium text-foreground">
-                          {batch.original_filename}
-                        </div>
-                        <div className="text-xs text-muted-foreground font-mono mt-0.5 opacity-70">
-                          ID: {batch.id}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4">
-                    <div className="flex flex-col gap-1.5 max-w-[140px]">
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>
-                          {batch.success_count.toLocaleString()} /{" "}
-                          {batch.total_rows.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${batch.success_count / batch.total_rows >= 0.9
-                            ? "bg-green-500"
-                            : batch.success_count / batch.total_rows >= 0.5
-                              ? "bg-blue-500"
-                              : "bg-amber-500"
-                            }`}
-                          style={{
-                            width: `${batch.total_rows > 0
-                              ? (batch.success_count / batch.total_rows) * 100
-                              : 0
-                              }%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3 px-4">
-                    <Badge
-                      variant="outline"
-                      className={`font-normal border-0 px-2 py-0.5 ${batch.status === "Completed"
-                        ? "bg-green-500/10 text-green-700 hover:bg-green-500/20"
-                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                        }`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full mr-1.5 ${batch.status === "Completed"
-                          ? "bg-green-500"
-                          : "bg-gray-500"
-                          }`}
-                      />
-                      {batch.status}
-                    </Badge>
-                  </td>
-                  <td className="py-3 px-4 text-right text-muted-foreground font-mono text-xs">
-                    {new Date(batch.created_at).toLocaleString(undefined, {
-                      year: "numeric",
-                      month: "2-digit",
-                      day: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                      hour12: false,
-                    })}
-                  </td>
-                  <td className="py-3 px-4 pr-6 text-right">
-                    <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-primary transition-colors" />
-                  </td>
-                </tr>
+                  batch={batch}
+                  onStatusChange={fetchBatches}
+                />
               ))}
               {batches.length === 0 && (
                 <tr>
@@ -340,12 +239,6 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
-      {!isUploadOpen && activeTasks.length > 0 && (
-        <TaskManager
-          tasks={activeTasks}
-          onCloseTask={(id) => setActiveTasks(prev => prev.filter(t => t.id !== id))}
-        />
-      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ type BatchStatus string
 const (
 	BatchStatusPending    BatchStatus = "Pending"
 	BatchStatusProcessing BatchStatus = "Processing"
+	BatchStatusPaused     BatchStatus = "Paused"
+	BatchStatusCancelled  BatchStatus = "Cancelled"
 	BatchStatusCompleted  BatchStatus = "Completed"
 	BatchStatusFailed     BatchStatus = "Failed"
 )

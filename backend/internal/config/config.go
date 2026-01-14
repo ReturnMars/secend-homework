@@ -44,24 +44,66 @@ func (c *Config) GetDatabaseDSN() string {
 func LoadConfig() *Config {
 	c := &Config{}
 
-	// 默认设置
+	// 1. 默认设置
 	c.Server.Port = 8080
 	c.Server.Mode = "debug"
 	c.Database.Host = "localhost"
 	c.Database.Port = 5436
 	c.Database.SSLMode = "disable"
+	c.Database.TimeZone = "Asia/Shanghai"
 
-	// 尝试从文件读取
-	data, err := os.ReadFile("config.yaml")
-	if err == nil {
-		_ = yaml.Unmarshal(data, c)
+	// 2. 确定当前环境
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "dev"
 	}
 
-	// 环境变量覆盖端口
+	// 3. 构建候选配置文件路径列表（按优先级排序）
+	// 支持在 root 或 backend/ 目录下运行，并优先环境特定配置
+	candidates := []string{
+		fmt.Sprintf("./config.%s.yaml", env),
+		fmt.Sprintf("../config.%s.yaml", env),
+		"./config.yaml",
+		"../config.yaml",
+	}
+
+	// 4. 按顺序尝试加载
+	var loaded bool
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			if err := yaml.Unmarshal(data, c); err == nil {
+				log.Printf("[Config] Loaded config from: %s", path)
+				loaded = true
+				break
+			}
+		}
+	}
+
+	if !loaded {
+		log.Println("[Config] No config file found, using defaults and environment variables.")
+	}
+
+	// 5. 环境变量覆盖
 	if envPort := os.Getenv("SERVER_PORT"); envPort != "" {
 		fmt.Sscanf(envPort, "%d", &c.Server.Port)
 	}
+	if host := os.Getenv("DB_HOST"); host != "" {
+		c.Database.Host = host
+	}
+	if user := os.Getenv("DB_USER"); user != "" {
+		c.Database.User = user
+	}
+	if pwd := os.Getenv("DB_PASSWORD"); pwd != "" {
+		c.Database.Password = pwd
+	}
+	if name := os.Getenv("DB_NAME"); name != "" {
+		c.Database.Name = name
+	}
+	if port := os.Getenv("DB_PORT"); port != "" {
+		fmt.Sscanf(port, "%d", &c.Database.Port)
+	}
 
-	log.Printf("[Config] Server config loaded. Mode: %s, Port: %d", c.Server.Mode, c.Server.Port)
+	log.Printf("[Config] Server config initialized. Env: %s, Mode: %s, Port: %d", env, c.Server.Mode, c.Server.Port)
 	return c
 }

@@ -427,3 +427,42 @@ func (h *CsvHandler) UpdateBatch(c *gin.Context) {
 	}
 	utils.SuccessResponse(c, gin.H{"message": "Batch updated successfully"})
 }
+
+// PauseBatch 暂停批次处理
+func (h *CsvHandler) PauseBatch(c *gin.Context) {
+	idStr := c.Param("id")
+	var id uint
+	fmt.Sscanf(idStr, "%d", &id)
+
+	if err := h.Service.PauseBatch(id); err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.SuccessResponse(c, gin.H{"message": "Batch paused successfully"})
+}
+
+// ResumeBatch 恢复批次处理
+func (h *CsvHandler) ResumeBatch(c *gin.Context) {
+	idStr := c.Param("id")
+	var id uint
+	fmt.Sscanf(idStr, "%d", &id)
+
+	if err := h.Service.ResumeBatch(id); err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.SuccessResponse(c, gin.H{"message": "Batch resumed successfully"})
+}
+
+// CancelBatch 取消批次处理
+func (h *CsvHandler) CancelBatch(c *gin.Context) {
+	idStr := c.Param("id")
+	var id uint
+	fmt.Sscanf(idStr, "%d", &id)
+
+	if err := h.Service.CancelBatch(id); err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.SuccessResponse(c, gin.H{"message": "Batch cancelled successfully"})
+}

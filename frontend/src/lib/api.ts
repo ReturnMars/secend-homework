@@ -236,4 +236,8 @@ export const api = {
     const token = localStorage.getItem("auth_token");
     return new EventSource(`${API_BASE_URL}/batches/${batchId}/progress?token=${token}`);
   },
+
+  pauseBatch: (id: string | number) => api.post(`/batches/${id}/pause`),
+  resumeBatch: (id: string | number) => api.post(`/batches/${id}/resume`),
+  cancelBatch: (id: string | number) => api.post(`/batches/${id}/cancel`),
 };

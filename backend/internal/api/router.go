@@ -3,7 +3,9 @@ package api
 import (
 	"etl-tool/internal/api/handler"
 	"etl-tool/internal/service"
+	"net/http/pprof"
 
+	"github.com/arl/statsviz"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -25,6 +27,33 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 
 	h := handler.NewCsvHandler(svc)
 	authHandler := handler.NewAuthHandler(svc.DB)
+
+	// PPROF Debug Routes
+	debug := r.Group("/debug/pprof")
+	{
+		debug.GET("/", gin.WrapF(pprof.Index))
+		debug.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+		debug.GET("/profile", gin.WrapF(pprof.Profile))
+		debug.GET("/symbol", gin.WrapF(pprof.Symbol))
+		debug.GET("/trace", gin.WrapF(pprof.Trace))
+		debug.GET("/allocs", gin.WrapF(pprof.Handler("allocs").ServeHTTP))
+		debug.GET("/block", gin.WrapF(pprof.Handler("block").ServeHTTP))
+		debug.GET("/goroutine", gin.WrapF(pprof.Handler("goroutine").ServeHTTP))
+		debug.GET("/heap", gin.WrapF(pprof.Handler("heap").ServeHTTP))
+		debug.GET("/mutex", gin.WrapF(pprof.Handler("mutex").ServeHTTP))
+		debug.GET("/threadcreate", gin.WrapF(pprof.Handler("threadcreate").ServeHTTP))
+		debug.POST("/symbol", gin.WrapF(pprof.Symbol))
+	}
+
+	// Statsviz
+	srv, _ := statsviz.NewServer() // default root is /debug/statsviz
+	r.GET("/debug/statsviz/*filepath", func(context *gin.Context) {
+		if context.Param("filepath") == "/ws" {
+			srv.Ws()(context.Writer, context.Request)
+			return
+		}
+		srv.Index()(context.Writer, context.Request)
+	})
 
 	// API Routes
 	api := r.Group("/api")
@@ -73,6 +102,9 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 			protected.GET("/batches/:id/export", h.ExportBatch)
 			protected.PATCH("/batches/:id", h.UpdateBatch)
 			protected.GET("/batches/:id/progress", h.StreamBatchProgress)
+			protected.POST("/batches/:id/pause", h.PauseBatch)
+			protected.POST("/batches/:id/resume", h.ResumeBatch)
+			protected.POST("/batches/:id/cancel", h.CancelBatch)
 
 			protected.PUT("/records/:id", h.UpdateRecord)
 			protected.GET("/records/:id/history", h.GetRecordHistory)

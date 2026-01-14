@@ -8,13 +8,17 @@ import {
   Clock,
   CheckCircle2,
   Zap,
-  Loader2
+  Loader2,
+  Pause,
+  Play,
+  Square,
 } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { api } from "../lib/api";
+import { useBatchActions } from "../hooks/useBatchActions";
 import { sha256 } from "js-sha256";
 
 export interface ProcessStats {
@@ -27,17 +31,20 @@ export interface ProcessStats {
 
 interface UploadZoneProps {
   onSuccess: (stats: ProcessStats, fileName?: string) => void;
-  onTaskStarted?: (batchId: string, fileName: string) => void;
 }
 
-const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => {
+const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processProgress, setProcessProgress] = useState(0);
-  const [phase, setPhase] = useState<"idle" | "hashing" | "uploading" | "processing">("idle");
+  const [phase, setPhase] = useState<
+    "idle" | "hashing" | "uploading" | "processing"
+  >("idle");
+  const [status, setStatus] = useState<string>("Pending");
   const [error, setError] = useState<string | null>(null);
+  const [batchId, setBatchId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processingStartTimeRef = useRef<number>(0);
@@ -49,44 +56,52 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
     failed: 0,
     elapsed: 0,
     eta: 0,
-    speed: 0
+    speed: 0,
   });
 
   useEffect(() => {
     let timer: number;
     if (phase === "processing" && processingStartTimeRef.current > 0) {
-      setMetrics(prev => ({ ...prev, elapsed: 0 }));
+      setMetrics((prev) => ({ ...prev, elapsed: 0 }));
       timer = window.setInterval(() => {
         const now = Date.now();
-        const elapsed = Math.floor((now - processingStartTimeRef.current) / 1000);
+        const elapsed = Math.floor(
+          (now - processingStartTimeRef.current) / 1000
+        );
         if (elapsed >= 0 && elapsed < 86400) {
-          setMetrics(prev => ({ ...prev, elapsed }));
+          setMetrics((prev) => ({ ...prev, elapsed }));
         }
       }, 1000);
     }
     return () => clearInterval(timer);
   }, [phase]);
 
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    if (uploading) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setIsDragging(true);
-    } else if (e.type === "dragleave") {
-      setIsDragging(false);
-    }
-  }, [uploading]);
+  const handleDrag = useCallback(
+    (e: React.DragEvent) => {
+      if (uploading) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type === "dragenter" || e.type === "dragover") {
+        setIsDragging(true);
+      } else if (e.type === "dragleave") {
+        setIsDragging(false);
+      }
+    },
+    [uploading]
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    if (uploading) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      validateAndSetFile(e.dataTransfer.files[0]);
-    }
-  }, [uploading]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (uploading) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        validateAndSetFile(e.dataTransfer.files[0]);
+      }
+    },
+    [uploading]
+  );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -133,7 +148,15 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
     setPhase("hashing"); // 标记为正在计算特征
     setUploadProgress(0);
     setProcessProgress(0);
-    setMetrics({ total: 0, processed: 0, success: 0, failed: 0, elapsed: 0, eta: 0, speed: 0 });
+    setMetrics({
+      total: 0,
+      processed: 0,
+      success: 0,
+      failed: 0,
+      elapsed: 0,
+      eta: 0,
+      speed: 0,
+    });
 
     try {
       // 1. 生成极速指纹 (针对 2GB 采样) - 使用 js-sha256 兼容非 HTTPS 环境
@@ -143,25 +166,36 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
         const head = file.slice(0, SAMPLE_SIZE);
         const tail = file.slice(Math.max(0, file.size - SAMPLE_SIZE));
         const metaStr = `${file.size}-${file.lastModified}`;
-        const combinedBuffer = await new Blob([head, tail, new TextEncoder().encode(metaStr)]).arrayBuffer();
+        const combinedBuffer = await new Blob([
+          head,
+          tail,
+          new TextEncoder().encode(metaStr),
+        ]).arrayBuffer();
 
         fileHash = sha256(combinedBuffer);
         console.log("[Hash] Fast Fingerprint generated (Library):", fileHash);
 
         // 2. 秒传预检 (仅在有 Hash 时执行)
         const checkRes = await api.checkHash(fileHash);
-        if (checkRes && (checkRes as any).exists && (checkRes as any).batch_id) {
+        if (
+          checkRes &&
+          (checkRes as any).exists &&
+          (checkRes as any).batch_id
+        ) {
           console.log("[Instant Upload] File found on server.");
           const b_id = (checkRes as any).batch_id.toString();
+          setBatchId(b_id);
           setUploadProgress(100);
-          if (onTaskStarted) onTaskStarted(b_id, file.name);
           setPhase("processing");
           processingStartTimeRef.current = Date.now();
           startSSE(b_id);
           return;
         }
       } catch (checkErr) {
-        console.warn("[Instant Check] Hash computation or check failed", checkErr);
+        console.warn(
+          "[Instant Check] Hash computation or check failed",
+          checkErr
+        );
       }
 
       // 3. 正常上传流程
@@ -174,7 +208,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
       );
 
       const { batch_id } = res;
-      if (onTaskStarted) onTaskStarted(batch_id.toString(), file.name);
+      setBatchId(batch_id.toString());
       setPhase("processing");
       processingStartTimeRef.current = Date.now();
       startSSE(batch_id.toString());
@@ -191,6 +225,7 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
     evtSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        setStatus(data.status);
 
         if (data.total_rows > 0) {
           const processed = data.processed_rows;
@@ -204,20 +239,20 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
           let eta = 0;
 
           if (elapsedMs > 2000 && processed > 100) {
-            speed = (processed / (elapsedMs / 1000));
+            speed = processed / (elapsedMs / 1000);
             const remaining = total - processed;
             eta = speed > 0 ? Math.ceil(remaining / speed) : 0;
           }
 
           setProcessProgress(percent);
-          setMetrics(prev => ({
+          setMetrics((prev) => ({
             ...prev,
             total,
             processed,
             success: data.filters?.success || 0,
             failed: data.filters?.failed || 0,
             speed: Math.round(speed),
-            eta
+            eta,
           }));
         }
 
@@ -248,13 +283,14 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
       console.error("SSE Error", err);
       evtSource.close();
       if (processProgress < 100) {
-        setError("Connection lost during processing");
+        setError(
+          "Connection lost during processing. You can try to resume later."
+        );
         setUploading(false);
         setPhase("idle");
       }
     };
   };
-
   const triggerFileInput = () => {
     if (uploading) return;
     fileInputRef.current?.click();
@@ -264,6 +300,8 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
     e.stopPropagation();
     if (uploading) return;
     setFile(null);
+    setBatchId(null);
+    setStatus("Pending");
     setError(null);
     setUploadProgress(0);
     setProcessProgress(0);
@@ -271,6 +309,9 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
       fileInputRef.current.value = "";
     }
   };
+
+  const { handlePause, handleResume, handleCancel, isActionLoading } =
+    useBatchActions(batchId || undefined);
 
   return (
     <div className="w-full space-y-6">
@@ -314,7 +355,12 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
                 </p>
               </div>
               {!uploading && (
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={clearFile}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground"
+                  onClick={clearFile}
+                >
                   <X className="h-4 w-4" />
                 </Button>
               )}
@@ -326,32 +372,66 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
                   <div className="flex justify-between text-xs font-semibold">
                     <span className="flex items-center gap-1.5 grayscale">
                       <UploadCloud className="h-3.5 w-3.5" />
-                      {phase === "hashing"
-                        ? (
-                          <span className="flex items-center gap-1.5 text-primary">
-                            0. Scanning File Fingerprint...
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          </span>
-                        )
-                        : phase === "uploading"
-                          ? "1. Network Inbound"
-                          : "1. Upload Success"}
+                      {phase === "hashing" ? (
+                        <span className="flex items-center gap-1.5 text-primary">
+                          0. Scanning File Fingerprint...
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        </span>
+                      ) : phase === "uploading" ? (
+                        "1. Network Inbound"
+                      ) : (
+                        "1. Upload Success"
+                      )}
                     </span>
-                    <span className="font-mono">{phase === "uploading" ? `${uploadProgress}%` : phase === "hashing" ? "0%" : "100%"}</span>
+                    <span className="font-mono">
+                      {phase === "uploading"
+                        ? `${uploadProgress}%`
+                        : phase === "hashing"
+                        ? "0%"
+                        : "100%"}
+                    </span>
                   </div>
-                  <Progress value={phase === "uploading" ? uploadProgress : (phase === "hashing" ? 0 : 100)} className="h-1" />
+                  <Progress
+                    value={
+                      phase === "uploading"
+                        ? uploadProgress
+                        : phase === "hashing"
+                        ? 0
+                        : 100
+                    }
+                    className="h-1"
+                  />
                 </div>
 
                 {phase === "processing" && (
                   <div className="p-5 bg-card/50 rounded-2xl space-y-5 border border-primary/10 shadow-inner animate-in fade-in zoom-in-95 duration-500">
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                      <MetricItem label="Total" value={`${(metrics.total / 10000).toFixed(1)}w`} />
-                      <MetricItem label="Cleaned" value={`${(metrics.success / 10000).toFixed(1)}w`} color="text-green-500" />
-                      <MetricItem label="Dirty" value={`${(metrics.failed / 10000).toFixed(1)}w`} color="text-amber-500" />
+                      <MetricItem
+                        label="Total"
+                        value={`${(metrics.total / 10000).toFixed(1)}w`}
+                      />
+                      <MetricItem
+                        label="Cleaned"
+                        value={`${(metrics.success / 10000).toFixed(1)}w`}
+                        color="text-green-500"
+                      />
+                      <MetricItem
+                        label="Dirty"
+                        value={`${(metrics.failed / 10000).toFixed(1)}w`}
+                        color="text-amber-500"
+                      />
                       <MetricItem
                         label="Speed"
-                        value={processProgress === 100 && metrics.speed === 0 ? "CACHED" : `${(metrics.speed / 1000).toFixed(1)}k`}
-                        unit={processProgress === 100 && metrics.speed === 0 ? "" : "r/s"}
+                        value={
+                          processProgress === 100 && metrics.speed === 0
+                            ? "CACHED"
+                            : `${(metrics.speed / 1000).toFixed(1)}k`
+                        }
+                        unit={
+                          processProgress === 100 && metrics.speed === 0
+                            ? ""
+                            : "r/s"
+                        }
                         hasZap
                       />
                     </div>
@@ -363,16 +443,77 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
                           2. ETL Pipeline Processing
                         </span>
                         <div className="flex gap-2 text-[10px] items-center">
+                          {/* Task Controls */}
+                          <div className="flex items-center gap-1 mr-2 border-r pr-2 border-border/50">
+                            {(status === "Processing" ||
+                              status === "Pending") && (
+                              <button
+                                onClick={handlePause}
+                                disabled={isActionLoading}
+                                className="p-1.5 hover:bg-amber-500/10 text-amber-600 rounded-md transition-colors disabled:opacity-50"
+                                title="Pause"
+                              >
+                                {isActionLoading ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Pause className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            )}
+                            {status === "Paused" && (
+                              <button
+                                onClick={handleResume}
+                                disabled={isActionLoading}
+                                className="p-1.5 hover:bg-green-500/10 text-green-600 rounded-md transition-colors disabled:opacity-50"
+                                title="Resume"
+                              >
+                                {isActionLoading ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Play className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            )}
+                            {(status === "Processing" ||
+                              status === "Pending" ||
+                              status === "Paused") && (
+                              <button
+                                onClick={handleCancel}
+                                disabled={isActionLoading}
+                                className="p-1.5 hover:bg-red-500/10 text-destructive rounded-md transition-colors disabled:opacity-50"
+                                title="Cancel"
+                              >
+                                {isActionLoading ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Square className="h-3 w-3 fill-current" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+
                           <div className="flex items-center gap-1.5 bg-muted px-2 py-1 rounded-md min-w-[70px]">
                             <Clock className="h-3 w-3" />
-                            <span className="font-mono font-bold">{formatTime(metrics.elapsed)}</span>
+                            <span className="font-mono font-bold">
+                              {status === "Paused"
+                                ? "PAUSED"
+                                : status === "Cancelled"
+                                ? "CANCELLED"
+                                : formatTime(metrics.elapsed)}
+                            </span>
                           </div>
                           <div className="flex items-center gap-1.5 bg-primary text-primary-foreground px-2 py-1 rounded-md min-w-[100px]">
                             <span className="opacity-70 text-[8px] uppercase font-black">
                               {processProgress === 100 ? "Status" : "ETA"}
                             </span>
                             <span className="font-mono font-bold leading-none">
-                              {processProgress === 100 ? "FINISHED" : (metrics.eta > 0 ? formatTime(metrics.eta) : "--")}
+                              {processProgress === 100
+                                ? "FINISHED"
+                                : status === "Paused"
+                                ? "--"
+                                : metrics.eta > 0
+                                ? formatTime(metrics.eta)
+                                : "--"}
                             </span>
                           </div>
                         </div>
@@ -394,8 +535,12 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
               <UploadCloud className="w-10 h-10 text-muted-foreground group-hover:text-primary transition-all duration-300" />
             </div>
             <div className="text-center space-y-1">
-              <p className="font-semibold text-lg text-foreground">Click to upload or drag & drop</p>
-              <p className="text-sm text-muted-foreground">Support 2GB+ CSV/Excel Datasets</p>
+              <p className="font-semibold text-lg text-foreground">
+                Click to upload or drag & drop
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Support 2GB+ CSV/Excel Datasets
+              </p>
             </div>
           </>
         )}
@@ -409,37 +554,64 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess, onTaskStarted }) => 
           size="lg"
         >
           {uploading ? (
-            phase === "hashing"
-              ? "Generating Digital Signatures..."
-              : phase === "uploading"
-                ? "Streaming to Storage..."
-                : `Processing Record Pipeline...`
+            phase === "hashing" ? (
+              "Generating Digital Signatures..."
+            ) : phase === "uploading" ? (
+              "Streaming to Storage..."
+            ) : (
+              `Processing Record Pipeline...`
+            )
           ) : (
             <>
-              <FileSpreadsheet className="mr-3 h-5 w-5" /> Initialize Data Pipeline
+              <FileSpreadsheet className="mr-3 h-5 w-5" /> Initialize Data
+              Pipeline
             </>
           )}
         </Button>
       </div>
 
       {error && (
-        <Alert variant="destructive" className="border-2 animate-in slide-in-from-top-4">
+        <Alert
+          variant="destructive"
+          className="border-2 animate-in slide-in-from-top-4"
+        >
           <AlertCircle className="h-5 w-5" />
-          <AlertTitle className="font-bold text-sm">System Halt / Pipeline Error</AlertTitle>
-          <AlertDescription className="text-xs font-mono break-all">{error}</AlertDescription>
+          <AlertTitle className="font-bold text-sm">
+            System Halt / Pipeline Error
+          </AlertTitle>
+          <AlertDescription className="text-xs font-mono break-all">
+            {error}
+          </AlertDescription>
         </Alert>
       )}
     </div>
   );
 };
 
-const MetricItem = ({ label, value, color = "text-foreground", unit = "", hasZap = false }: any) => (
+const MetricItem = ({
+  label,
+  value,
+  color = "text-foreground",
+  unit = "",
+  hasZap = false,
+}: any) => (
   <div className="space-y-1.5">
-    <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-black opacity-60">{label}</p>
-    <p className={clsx("text-lg font-mono font-black tracking-tighter flex items-center gap-1", color)}>
+    <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-black opacity-60">
+      {label}
+    </p>
+    <p
+      className={clsx(
+        "text-lg font-mono font-black tracking-tighter flex items-center gap-1",
+        color
+      )}
+    >
       {hasZap && <Zap className="h-3 w-3 text-primary" />}
       {value}
-      {unit && <span className="text-[10px] uppercase font-normal text-muted-foreground ml-0.5">{unit}</span>}
+      {unit && (
+        <span className="text-[10px] uppercase font-normal text-muted-foreground ml-0.5">
+          {unit}
+        </span>
+      )}
     </p>
   </div>
 );

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"runtime"
@@ -16,6 +17,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// activeTasks 维护当前正在运行的任务，支持中断操作
+var (
+	activeTasks   = make(map[uint]context.CancelFunc)
+	activeTasksMu sync.Mutex
+)
+
 // CleanerService 是核心服务，提供数据清洗和处理功能
 type CleanerService struct {
 	DB *gorm.DB
@@ -28,9 +35,38 @@ func NewCleanerService() *CleanerService {
 
 // ProcessFileAsync 启动协程异步处理文件
 func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	activeTasksMu.Lock()
+	// 如果已有任务在运行，先取消（防止重复处理）
+	if oldCancel, exists := activeTasks[batchID]; exists {
+		oldCancel()
+	}
+	activeTasks[batchID] = cancel
+	activeTasksMu.Unlock()
+
 	go func() {
-		err := s.processFileStream(batchID, filePath)
+		defer func() {
+			activeTasksMu.Lock()
+			delete(activeTasks, batchID)
+			activeTasksMu.Unlock()
+		}()
+
+		// 获取当前批次以检查是否需要恢复进度
+		var batch model.ImportBatch
+		if err := s.DB.First(&batch, batchID).Error; err != nil {
+			log.Printf("[Crucial] Batch %d not found: %v", batchID, err)
+			return
+		}
+
+		err := s.processFileStream(ctx, batchID, filePath, batch.ProcessedRows)
 		if err != nil {
+			// 如果是由于 Context 取消（暂停或取消），不需要标记为 Failed
+			if ctx.Err() != nil {
+				log.Printf("[Info] Batch %d processing interrupted: %v", batchID, ctx.Err())
+				return
+			}
+
 			log.Printf("[Crucial] Batch %d Failed: %v", batchID, err)
 			// 将错误信息记录到数据库，以便前端展示
 			s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
@@ -43,21 +79,27 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 }
 
 // processFileStream 使用流式迭代器处理文件以节省内存
-func (s *CleanerService) processFileStream(batchID uint, filePath string) error {
-	// 1. 估算总行数
-	startCount := time.Now()
-	totalLines, _ := utils.CountLines(filePath)
-	if totalLines > 0 {
-		totalLines-- // 排除表头
+func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, filePath string, skipRows int) error {
+	// 1. 估算总行数 (如果是重新开始)
+	var totalLines int
+	if skipRows == 0 {
+		startCount := time.Now()
+		totalLines64, _ := utils.CountLines(filePath)
+		totalLines = int(totalLines64)
+		if totalLines > 0 {
+			totalLines-- // 排除表头
+		}
+		log.Printf("[Performance] CountLines took: %v for file: %s", time.Since(startCount), filePath)
 	}
-	log.Printf("[Performance] CountLines took: %v for file: %s", time.Since(startCount), filePath)
 
 	// 2. 更新状态和总行数
-	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
-		Updates(map[string]interface{}{
-			"status":     model.BatchStatusProcessing,
-			"total_rows": totalLines,
-		})
+	updateMap := map[string]interface{}{
+		"status": model.BatchStatusProcessing,
+	}
+	if skipRows == 0 {
+		updateMap["total_rows"] = totalLines
+	}
+	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).Updates(updateMap)
 
 	// 3. 打开文件流
 	iter, err := utils.NewRowIterator(filePath)
@@ -79,10 +121,21 @@ func (s *CleanerService) processFileStream(batchID uint, filePath string) error 
 
 	// 5. 极致性能：针对千万级数据，先卸载索引，写完后瞬间重建
 	repository.DropSearchIndexes()
-	stats, err := s.processRows(iter, batchID, indices)
+	stats, err := s.processRows(ctx, iter, batchID, indices, skipRows)
+
+	// 关键：无论成功还是中断（暂停/取消），都应尝试重建索引，以便用户在界面上能正常搜索已导入的数据
 	repository.RebuildSearchIndexes()
 
 	if err != nil {
+		// 如果是主动中断，我们需要持久化当前的进度，以便后续 Resume
+		if ctx.Err() != nil {
+			s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+				Updates(map[string]interface{}{
+					"processed_rows": stats.rowIdx,
+					"success_count":  stats.successRows,
+					"failure_count":  stats.failedRows,
+				})
+		}
 		return err
 	}
 
@@ -124,14 +177,17 @@ type processStats struct {
 }
 
 // processRows 采用高度并发的 Worker Pool 模式处理数据
-func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indices utils.ColIndices) (*processStats, error) {
+func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator, batchID uint, indices utils.ColIndices, skipRows int) (*processStats, error) {
 	numWorkers := runtime.NumCPU() * 2 // 充分利用多核 CPU
 	if numWorkers < 8 {
 		numWorkers = 8
 	}
 	const batchSize = 4000 // 极致调优：13 字段 * 4000 = 52000 < 65535
 
-	stats := &processStats{rowIdx: 1}
+	stats := &processStats{rowIdx: 0}
+	if skipRows > 0 {
+		stats.rowIdx = skipRows
+	}
 
 	// 定义内部任务结构
 	type task struct {
@@ -218,6 +274,17 @@ func (s *CleanerService) processRows(iter utils.RowIterator, batchID uint, indic
 	// 3. 生产者：读取文件并分发任务
 	startTime := time.Now()
 	lastLogTime := time.Now()
+
+	// 3.1 如果需要恢复进度，执行跳过逻辑
+	if skipRows > 0 {
+		for i := 0; i < skipRows; i++ {
+			if !iter.Next() {
+				break
+			}
+		}
+		log.Printf("[Info] Batch %d resumed, skipped %d rows", batchID, skipRows)
+	}
+
 	var processErr error
 Loop:
 	for iter.Next() {
@@ -231,6 +298,10 @@ Loop:
 		}
 
 		select {
+		case <-ctx.Done():
+			// 关键点：当 Context 被取消时（暂停或取消），停止生产
+			processErr = ctx.Err()
+			break Loop
 		case err := <-errChan:
 			processErr = err
 			break Loop
@@ -242,6 +313,16 @@ Loop:
 	wg.Wait()         // 等待 Worker 完成计算
 	close(resultChan) // 通知 Saver 停止
 	<-saveDone        // 等待数据库写入完成
+
+	// 在函数返回前执行一次最终的状态同步 (确保即使不是 10000 的倍数也能精准更新)
+	sCount := atomic.LoadInt64(&successCount)
+	fCount := atomic.LoadInt64(&failureCount)
+	s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+		Updates(map[string]interface{}{
+			"processed_rows": stats.rowIdx,
+			"success_count":  int(sCount),
+			"failure_count":  int(fCount),
+		})
 
 	totalElapsed := time.Since(startTime)
 	log.Printf("[Performance] Total processing time (excluding CountLines): %v, Avg speed: %.2f rows/sec",
@@ -309,4 +390,46 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 	}
 
 	return rec
+}
+
+// PauseBatch 暂停正在运行的任务
+func (s *CleanerService) PauseBatch(batchID uint) error {
+	activeTasksMu.Lock()
+	cancel, exists := activeTasks[batchID]
+	if exists {
+		cancel()
+	}
+	activeTasksMu.Unlock()
+
+	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+		Update("status", model.BatchStatusPaused).Error
+}
+
+// ResumeBatch 恢复暂停的任务
+func (s *CleanerService) ResumeBatch(batchID uint) error {
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, batchID).Error; err != nil {
+		return err
+	}
+
+	if batch.Status != model.BatchStatusPaused {
+		return fmt.Errorf("only paused batches can be resumed")
+	}
+
+	// 重新拉起异步处理
+	s.ProcessFileAsync(batchID, batch.FilePath)
+	return nil
+}
+
+// CancelBatch 取消任务
+func (s *CleanerService) CancelBatch(batchID uint) error {
+	activeTasksMu.Lock()
+	cancel, exists := activeTasks[batchID]
+	if exists {
+		cancel()
+	}
+	activeTasksMu.Unlock()
+
+	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+		Update("status", model.BatchStatusCancelled).Error
 }
