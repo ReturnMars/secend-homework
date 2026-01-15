@@ -57,7 +57,11 @@ export const BatchRow: React.FC<BatchRowProps> = ({
   }, [initialBatch]);
 
   useEffect(() => {
-    if (status !== "Processing" && status !== "Pending") {
+    if (
+      status !== "Processing" &&
+      status !== "Pending" &&
+      status !== "Indexing"
+    ) {
       if (totalRows > 0) {
         setProgress(Math.round((successCount / totalRows) * 100));
       }
@@ -143,6 +147,11 @@ export const BatchRow: React.FC<BatchRowProps> = ({
                   : "connecting..."}
               </span>
             )}
+            {status === "Indexing" && (
+              <span className="font-sans text-amber-600 animate-pulse text-[9px] uppercase tracking-wider font-bold">
+                Optimizing Index...
+              </span>
+            )}
           </div>
           <Progress
             value={progress}
@@ -174,6 +183,8 @@ export const BatchRow: React.FC<BatchRowProps> = ({
                 ? "bg-green-500/10 text-green-700 hover:bg-green-500/20"
                 : status === "Processing"
                 ? "bg-primary/10 text-primary hover:bg-primary/20"
+                : status === "Indexing"
+                ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
                 : status === "Paused"
                 ? "bg-amber-500/10 text-amber-700 hover:bg-amber-500/20"
                 : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -184,7 +195,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
                 "w-1.5 h-1.5 rounded-full mr-1.5",
                 status === "Completed"
                   ? "bg-green-500 shadow-[0_0_5px_#22c55e]"
-                  : status === "Processing"
+                  : status === "Processing" || status === "Indexing"
                   ? "bg-primary animate-pulse shadow-[0_0_5px_#3b82f6]"
                   : status === "Paused"
                   ? "bg-amber-500"

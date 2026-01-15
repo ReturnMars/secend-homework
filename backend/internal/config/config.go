@@ -20,6 +20,7 @@ type Config struct {
 		SSLMode                string `yaml:"ssl_mode"`
 		TimeZone               string `yaml:"timezone"`
 		BatchInsertConcurrency int    `yaml:"batch_insert_concurrency"`
+		MaintenanceWorkMem     string `yaml:"maintenance_work_mem"`
 	} `yaml:"database"`
 	Server struct {
 		Port      int    `yaml:"port"`
@@ -56,6 +57,7 @@ func LoadConfig() *Config {
 	c.Database.SSLMode = "disable"
 	c.Database.TimeZone = "Asia/Shanghai"
 	c.Database.BatchInsertConcurrency = 2
+	c.Database.MaintenanceWorkMem = "32MB"
 
 	// 2. 确定当前环境
 	env := os.Getenv("APP_ENV")
@@ -107,6 +109,9 @@ func LoadConfig() *Config {
 	}
 	if port := os.Getenv("DB_PORT"); port != "" {
 		fmt.Sscanf(port, "%d", &c.Database.Port)
+	}
+	if maintMem := os.Getenv("DB_MAINT_MEM"); maintMem != "" {
+		c.Database.MaintenanceWorkMem = maintMem
 	}
 
 	log.Printf("[Config] Server config initialized. Env: %s, Mode: %s, Port: %d", env, c.Server.Mode, c.Server.Port)

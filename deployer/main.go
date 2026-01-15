@@ -59,10 +59,16 @@ func main() {
 	// 3. Docker 镜像准备
 	prepareImages()
 
-	// 4. 打包镜像
-	frontendTar := "etl-tool-frontend.tar.gz"
-	backendTar := "etl-tool-backend.tar.gz"
-	dbTar := "etl-tool-db.tar.gz"
+	// 4. 准备缓存目录
+	cacheDir := "../.cache"
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		log.Fatalf("❌ Failed to create cache directory: %v", err)
+	}
+
+	// 5. 打包镜像到 .cache 目录
+	frontendTar := filepath.Join(cacheDir, "etl-tool-frontend.tar.gz")
+	backendTar := filepath.Join(cacheDir, "etl-tool-backend.tar.gz")
+	dbTar := filepath.Join(cacheDir, "etl-tool-db.tar.gz")
 	saveAndCompressImage("etl-tool-frontend:latest", frontendTar)
 	saveAndCompressImage("etl-tool-backend:latest", backendTar)
 	saveAndCompressImage("postgres:17-alpine", dbTar)

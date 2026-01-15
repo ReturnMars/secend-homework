@@ -124,8 +124,16 @@ func (it *excelIterator) Err() error {
 }
 
 func (it *excelIterator) Close() error {
+	var firstErr error
 	if it.rows != nil {
-		it.rows.Close()
+		if err := it.rows.Close(); err != nil {
+			firstErr = err
+		}
 	}
-	return it.f.Close()
+	if it.f != nil {
+		if err := it.f.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

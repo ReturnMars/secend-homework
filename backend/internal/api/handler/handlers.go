@@ -300,6 +300,13 @@ func (h *CsvHandler) StreamBatchProgress(c *gin.Context) {
 			return false // stop stream
 		}
 
+		// Check if client disconnected
+		select {
+		case <-c.Request.Context().Done():
+			return false
+		default:
+		}
+
 		// Construct progress JSON
 		type Progress struct {
 			Status        string `json:"status"`
@@ -318,7 +325,7 @@ func (h *CsvHandler) StreamBatchProgress(c *gin.Context) {
 		// Parse Batch ID to uint
 		var bid uint
 		fmt.Sscanf(id, "%d", &bid)
-		if batch.Status == "Processing" {
+		if batch.Status == model.BatchStatusProcessing || batch.Status == model.BatchStatusIndexing {
 			currentSpeed = h.Service.GetBatchSpeed(bid)
 		}
 

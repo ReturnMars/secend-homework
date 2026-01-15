@@ -27,16 +27,38 @@ var (
 // CleanerService 是核心服务，提供数据清洗和处理功能
 type CleanerService struct {
 	DB          *gorm.DB
-	batchSpeeds sync.Map // 存储实时处理速度 (key: batchID, value: float64)
+	batchSpeeds sync.Map      // 存储实时处理速度 (key: batchID, value: float64)
+	processSem  chan struct{} // 限制并发处理任务数，防止内存爆炸
 }
 
 // NewCleanerService 创建一个新的 CleanerService 实例
 func NewCleanerService() *CleanerService {
-	return &CleanerService{DB: repository.DB}
+	// 自适应并发限制：逻辑核心数的一半，最低 2，最高 8（防止磁盘 IO 饱和）
+	limit := runtime.NumCPU() / 2
+	if limit < 2 {
+		limit = 2
+	}
+	if limit > 8 {
+		limit = 8
+	}
+
+	return &CleanerService{
+		DB:         repository.DB,
+		processSem: make(chan struct{}, limit),
+	}
 }
 
 // ProcessFileAsync 启动协程异步处理文件
 func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
+	// 获取处理令牌（并发控制）
+	select {
+	case s.processSem <- struct{}{}:
+		log.Printf("[Queue] Batch %d starting processing", batchID)
+	default:
+		log.Printf("[Queue] Batch %d waiting for slot", batchID)
+		s.processSem <- struct{}{}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	activeTasksMu.Lock()
@@ -49,9 +71,24 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 
 	go func() {
 		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[PANIC] Batch %d processing panicked: %v", batchID, r)
+				// 确保即使 panic 也更新状态
+				s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+					Updates(map[string]interface{}{
+						"status": model.BatchStatusFailed,
+						"error":  fmt.Sprintf("internal panic: %v", r),
+					})
+			}
+		}()
+		defer func() {
 			activeTasksMu.Lock()
 			delete(activeTasks, batchID)
 			activeTasksMu.Unlock()
+			// 释放令牌
+			<-s.processSem
+			// 清理该批次的速度统计缓存
+			s.batchSpeeds.Delete(batchID)
 		}()
 
 		// 获取当前批次以检查是否需要恢复进度
@@ -125,6 +162,11 @@ func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, fi
 	repository.DropSearchIndexes()
 	stats, err := s.processRows(ctx, iter, batchID, indices, skipRows)
 
+	// 数据已全部入库，但在搜索生效前需要重建索引
+	if err == nil {
+		s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).Update("status", model.BatchStatusIndexing)
+	}
+
 	// 关键：无论成功还是中断（暂停/取消），都应尝试重建索引，以便用户在界面上能正常搜索已导入的数据
 	repository.RebuildSearchIndexes()
 
@@ -194,31 +236,36 @@ func getAdaptiveConfig() (numWorkers int, numSavers int, bufferSize int, batchSi
 		numSavers = 2
 	}
 
-	// 内存配置：根据可用内存调整
-	bufferSize = 20000 // 默认高性能
-	batchSize = 4000
+	// 内存配置：根据当前堆内存实际占用调整
+	// 注意：之前使用 m.Sys 是不对的，因为 Sys 是 Go 从操作系统拿走的总量（只会增），
+	// HeapInuse 才是当前正在用的。
+	bufferSize = 10000 // 默认
+	batchSize = 2000
 
-	// 尝试检测可用内存
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	availableMB := int(m.Sys / 1024 / 1024) // 系统分配给 Go 的总内存
+	usedMB := int(m.HeapInuse / 1024 / 1024)
 
 	// 根据内存调整参数
 	switch {
-	case availableMB < 256: // 极低内存模式
-		bufferSize = 2000
+	case usedMB > 1500: // 内存压力极大 (针对 2G 机器)
+		bufferSize = 1000
+		batchSize = 500
+	case usedMB > 800: // 内存压力较大
+		bufferSize = 3000
 		batchSize = 1000
-	case availableMB < 512: // 低内存模式
+	case usedMB > 300: // 中等负载
 		bufferSize = 5000
-		batchSize = 2000
-	case availableMB < 1024: // 中等内存
+		batchSize = 1000
+	default:
+		// 初始状态或高性能机器
+		// 10000 的缓冲区足以抵消数据库抖动，且不会产生数以百万计的活跃对象
 		bufferSize = 10000
-		batchSize = 3000
-		// default: 保持高性能默认值
+		batchSize = 2000
 	}
 
 	log.Printf("[Adaptive] CPU: %d, Workers: %d, Savers: %d, BufferSize: %d, BatchSize: %d (SysMem: %dMB)",
-		cpuCount, numWorkers, numSavers, bufferSize, batchSize, availableMB)
+		cpuCount, numWorkers, numSavers, bufferSize, batchSize, usedMB)
 
 	return
 }
@@ -299,35 +346,23 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 		saverWg.Add(1)
 		go func() {
 			defer saverWg.Done()
-			var batch []map[string]interface{}
+			// 预分配切片容量，减少扩容导致的内存内存抖动
+			batch := make([]model.Record, 0, batchSize)
 
 			for rec := range resultChan {
-				// 使用 map 存储以避开 GORM 对 Struct 的反射损耗
-				batch = append(batch, map[string]interface{}{
-					"batch_id":      rec.BatchID,
-					"row_index":     rec.RowIndex,
-					"name":          rec.Name,
-					"phone":         rec.Phone,
-					"date":          rec.Date,
-					"address":       rec.Address,
-					"province":      rec.Province,
-					"city":          rec.City,
-					"district":      rec.District,
-					"status":        rec.Status,
-					"error_message": rec.ErrorMessage,
-					"raw_data":      rec.RawData,
-				})
+				batch = append(batch, rec)
 
 				if len(batch) >= batchSize {
-					// 高速写入：直接操作 Table
-					if err := s.DB.Table("records").Create(batch).Error; err != nil {
+					// 直接使用 GORM 的 Struct 批量创建，框架内部已高度优化
+					if err := s.DB.CreateInBatches(batch, batchSize).Error; err != nil {
 						log.Printf("[Saver] Bulk insert failed: %v", err)
 					}
-					batch = nil
+					// 彻底清空并重置切片，允许 GC 回收对象
+					batch = batch[:0]
 				}
 			}
 			if len(batch) > 0 {
-				s.DB.Table("records").Create(batch)
+				s.DB.CreateInBatches(batch, len(batch))
 			}
 		}()
 	}
@@ -358,7 +393,7 @@ Loop:
 		stats.rowIdx++
 
 		// 每 10 万行更新一次实时吞吐量（适应不同数据量）
-		if stats.rowIdx%100000 == 0 {
+		if stats.rowIdx%100000 == 0 && stats.rowIdx > 0 { // Ensure stats.rowIdx is not 0 for the first log
 			elapsed := time.Since(lastLogTime)
 			bps := float64(100000) / elapsed.Seconds()
 			if stats.rowIdx%1000000 == 0 {
@@ -376,7 +411,21 @@ Loop:
 		case err := <-errChan:
 			processErr = err
 			break Loop
-		case taskChan <- task{row: iter.Row(), idx: stats.rowIdx}:
+		default:
+			// Continue processing
+		}
+
+		row := iter.Row()
+		// 关键优化：不再只是拷贝 slice header，而是克隆每一个单元格的字符串。
+		// 这不仅是为了并发安全，更是为了切断对读取器底层大缓冲区的引用。
+		rowClone := make([]string, len(row))
+		for i, v := range row {
+			rowClone[i] = strings.Clone(strings.TrimSpace(v))
+		}
+
+		taskChan <- task{
+			row: rowClone,
+			idx: stats.rowIdx,
 		}
 	}
 
@@ -406,6 +455,24 @@ Loop:
 	stats.successRows = int(successCount)
 	stats.failedRows = int(failureCount)
 
+	// 显式从 sync.Map 中删除 batchID
+	s.batchSpeeds.Delete(batchID)
+
+	// // 强制 GC + 归还内存（验证用，确认无问题后可移除）
+	// runtime.GC()
+	// debug.FreeOSMemory()
+
+	// // 打印内存统计，验证内存回收情况
+	// var m runtime.MemStats
+	// runtime.ReadMemStats(&m)
+	// log.Printf("[Memory] HeapInUse: %.2f MB | HeapIdle: %.2f MB | HeapReleased: %.2f MB | HeapSys: %.2f MB | Sys(≈RSS): %.2f MB",
+	// 	float64(m.HeapInuse)/1024/1024,
+	// 	float64(m.HeapIdle)/1024/1024,
+	// 	float64(m.HeapReleased)/1024/1024,
+	// 	float64(m.HeapSys)/1024/1024,
+	// 	float64(m.Sys)/1024/1024,
+	// )
+
 	return stats, processErr
 }
 
@@ -413,15 +480,15 @@ Loop:
 func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx int, indices utils.ColIndices) model.Record {
 	getCol := func(idx int) string {
 		if idx >= 0 && idx < len(row) {
+			// 由于生产者已经执行过 strings.Clone，此处不需要重复 Clone
 			return row[idx]
 		}
 		return ""
 	}
-
-	rawName := strings.TrimSpace(getCol(indices.Name))
-	rawPhone := strings.TrimSpace(getCol(indices.Phone))
-	rawAddress := strings.TrimSpace(getCol(indices.Address))
-	rawDate := strings.TrimSpace(getCol(indices.Date))
+	rawName := getCol(indices.Name)
+	rawPhone := getCol(indices.Phone)
+	rawAddress := getCol(indices.Address)
+	rawDate := getCol(indices.Date)
 
 	rec := model.Record{
 		BatchID:  batchID,

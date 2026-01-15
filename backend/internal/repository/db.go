@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"etl-tool/internal/config"
 	"etl-tool/internal/model"
 	"fmt"
 	"log"
@@ -32,8 +33,12 @@ func RebuildSearchIndexes() {
 	log.Println("[Perf] Rebuilding all strategic indexes...")
 
 	// 关键：创建索引前先降低 maintenance_work_mem，避免 OOM
-	// 低配服务器使用 32MB，足够创建索引但不会占用过多内存
-	DB.Exec("SET maintenance_work_mem = '32MB'")
+	// 根据配置文件动态设置，开发机可以高一些，2C2G 生产环境可设为 32MB
+	mem := config.AppConfig.Database.MaintenanceWorkMem
+	if mem == "" {
+		mem = "32MB"
+	}
+	DB.Exec(fmt.Sprintf("SET maintenance_work_mem = '%s'", mem))
 
 	sqls := []struct{ name, sql string }{
 		{"Search Phone", "CREATE INDEX IF NOT EXISTS idx_records_fast_phone ON records (batch_id, phone varchar_pattern_ops, row_index)"},
@@ -107,8 +112,7 @@ func InitDB(dsn string) error {
 	}{
 		{"Disable Sync Commit", "SET synchronous_commit TO OFF"},
 		{"Expand Work Mem", "SET work_mem = '64MB'"},
-		{"Expand Maint Work Mem", "SET maintenance_work_mem = '512MB'"},
-		// 注意：索引创建已移至 processor.go 的后置阶段，此处不再重复创建以避免启动冲突
+		{"Expand Maint Work Mem", fmt.Sprintf("SET maintenance_work_mem = '%s'", config.AppConfig.Database.MaintenanceWorkMem)},
 	}
 
 	for _, item := range tuningSQLs {

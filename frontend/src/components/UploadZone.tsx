@@ -437,8 +437,17 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                       {/* Row 1: Title & Controls */}
                       <div className="flex justify-between items-center h-8">
                         <span className="flex items-center gap-2 text-xs font-bold text-primary">
-                          <CheckCircle2 className="h-4 w-4" />
-                          2. ETL Pipeline Processing
+                          {status === "Indexing" ? (
+                            <>
+                              <Zap className="h-4 w-4 text-amber-500 animate-bounce" />
+                              2. Database Engine Optimization
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="h-4 w-4" />
+                              2. ETL Pipeline Processing
+                            </>
+                          )}
                         </span>
 
                         {/* Controls */}
@@ -523,7 +532,9 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                             </span>
                             <span className="font-mono font-bold leading-none">
                               {processProgress === 100
-                                ? "FINISHED"
+                                ? status === "Indexing"
+                                  ? "OPTIMIZING"
+                                  : "FINISHED"
                                 : status === "Paused"
                                 ? "--"
                                 : metrics.eta > 0
@@ -568,6 +579,8 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
               "Generating Digital Signatures..."
             ) : phase === "uploading" ? (
               "Streaming to Storage..."
+            ) : status === "Indexing" ? (
+              "Applying Search Indexes..."
             ) : (
               `Processing Record Pipeline...`
             )

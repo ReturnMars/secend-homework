@@ -15,6 +15,8 @@ var (
 	regexAddress = regexp.MustCompile(`^([^省]+省|[^自治区]+自治区|[^市]+市)([^市]+市|[^州]+州|[^县]+县|[^盟]+盟)?([^区]+区|[^县]+县|[^旗]+旗)?`)
 	// regexNormalName 匹配正常姓名字符：中文、字母、数字、空格、点、下划线
 	regexNormalName = regexp.MustCompile(`[^\p{Han}a-zA-Z0-9\s._-]`)
+	// regexChineseDate 提取中文日期格式，预编译以提升速度并减少分配
+	regexChineseDate = regexp.MustCompile(`(\d+)[年/-](\d+)[月/-](\d+)日?`)
 )
 
 // CleanName 清洗并验证姓名
@@ -61,6 +63,11 @@ func CleanPhone(phone string) (string, error) {
 		return cleaned, fmt.Errorf("invalid length: %d (expected 11)", len(cleaned))
 	}
 
+	// 4. 验证首位必须为 1（中国手机号规则）
+	if cleaned[0] != '1' {
+		return cleaned, fmt.Errorf("invalid prefix: must start with 1")
+	}
+
 	return cleaned, nil
 }
 
@@ -74,8 +81,7 @@ func CleanDate(dateStr string) (string, error) {
 
 	// 1. 处理中文格式，如 "23年1月1日" 或 "2023年01月01日"
 	if strings.ContainsAny(d, "年月日") {
-		re := regexp.MustCompile(`(\d+)[年/-](\d+)[月/-](\d+)日?`)
-		matches := re.FindStringSubmatch(d)
+		matches := regexChineseDate.FindStringSubmatch(d)
 		if len(matches) == 4 {
 			year := matches[1]
 			month := matches[2]
@@ -96,11 +102,25 @@ func CleanDate(dateStr string) (string, error) {
 		}
 	}
 
-	// 2. 清理常见分隔符并统一使用短横线
+	// 2. 处理紧凑格式 (yyyyMMdd)，如 "20231225"
+	if len(d) == 8 {
+		allDigits := true
+		for _, c := range d {
+			if c < '0' || c > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			d = fmt.Sprintf("%s-%s-%s", d[:4], d[4:6], d[6:8])
+		}
+	}
+
+	// 3. 清理常见分隔符并统一使用短横线
 	d = strings.ReplaceAll(d, "/", "-")
 	d = strings.ReplaceAll(d, ".", "-")
 
-	// 3. 使用预编译正则验证最终格式
+	// 4. 使用预编译正则验证最终格式
 	if !regexDate.MatchString(d) {
 		return d, fmt.Errorf("invalid format")
 	}
@@ -114,6 +134,30 @@ func ExtractAddress(addr string) (province, city, district string) {
 		return "", "", ""
 	}
 
+	// 直辖市列表
+	municipalities := []string{"北京市", "上海市", "天津市", "重庆市"}
+
+	// 检查是否为直辖市
+	for _, m := range municipalities {
+		if strings.HasPrefix(addr, m) {
+			province = m
+			city = m
+			// 提取区/县（支持：区、县、新区）
+			remaining := addr[len(m):]
+			if idx := strings.Index(remaining, "区"); idx != -1 {
+				district = remaining[:idx+len("区")]
+				// 检查是否为"新区"
+				if strings.HasSuffix(remaining[:idx], "新") {
+					// 已经包含在 district 中
+				}
+			} else if idx := strings.Index(remaining, "县"); idx != -1 {
+				district = remaining[:idx+len("县")]
+			}
+			return province, city, district
+		}
+	}
+
+	// 非直辖市：使用正则匹配
 	res := regexAddress.FindStringSubmatch(addr)
 	if len(res) >= 2 {
 		province = strings.TrimSpace(res[1])

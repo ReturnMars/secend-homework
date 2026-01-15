@@ -16,6 +16,8 @@ dist
 dist-ssr
 *.local
 deployer/.cache
+.cache/
+*.tar.gz
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
