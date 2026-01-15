@@ -13,7 +13,7 @@ database:
   port: 5436
   ssl_mode: "disable"
   timezone: "Asia/Shanghai"
-  batch_insert_concurrency: 4 # 写入并发数，默认 2，高性能机可调大
+  batch_insert_concurrency: 8 # 写入并发数，默认 2，高性能机可调大
 
 # ------------------------------------------------------------------------------
 # 2. 后端服务配置 (Go / Gin)
