@@ -437,17 +437,8 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                       {/* Row 1: Title & Controls */}
                       <div className="flex justify-between items-center h-8">
                         <span className="flex items-center gap-2 text-xs font-bold text-primary">
-                          {status === "Indexing" ? (
-                            <>
-                              <Zap className="h-4 w-4 text-amber-500 animate-bounce" />
-                              2. Database Engine Optimization
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="h-4 w-4" />
-                              2. ETL Pipeline Processing
-                            </>
-                          )}
+                          <CheckCircle2 className="h-4 w-4" />
+                          2. ETL Pipeline Processing
                         </span>
 
                         {/* Controls */}
@@ -531,10 +522,10 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                               ETA
                             </span>
                             <span className="font-mono font-bold leading-none">
-                              {processProgress === 100
-                                ? status === "Indexing"
-                                  ? "OPTIMIZING"
-                                  : "FINISHED"
+                              {status === "Completed"
+                                ? "FINISHED"
+                                : status === "Indexing"
+                                ? "--"
                                 : status === "Paused"
                                 ? "--"
                                 : metrics.eta > 0
@@ -544,6 +535,55 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
                           </div>
                         </div>
                       </div>
+
+                      {/* Step 3: Indexing (only show when processing complete) */}
+                      {(status === "Indexing" || processProgress === 100) && (
+                        <div className="mt-4 pt-4 border-t border-primary/10 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                          <div className="flex justify-between items-center h-8">
+                            <span className="flex items-center gap-2 text-xs font-bold">
+                              {status === "Indexing" ? (
+                                <>
+                                  <Zap className="h-4 w-4 text-amber-500 animate-bounce" />
+                                  <span className="text-amber-500">
+                                    3. Database Index Optimization
+                                  </span>
+                                </>
+                              ) : status === "Completed" ? (
+                                <>
+                                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                  <span className="text-green-500">
+                                    3. Index Optimization Complete
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                                  <span className="text-muted-foreground">
+                                    3. Waiting for Data...
+                                  </span>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          <Progress
+                            value={
+                              status === "Completed"
+                                ? 100
+                                : status === "Indexing"
+                                ? 50
+                                : 0
+                            }
+                            className="h-2"
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            {status === "Indexing"
+                              ? "Building search indexes for fast queries..."
+                              : status === "Completed"
+                              ? "All indexes ready. You can now search and filter data."
+                              : "Will start after data processing completes."}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

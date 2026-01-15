@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -458,20 +459,19 @@ Loop:
 	// 显式从 sync.Map 中删除 batchID
 	s.batchSpeeds.Delete(batchID)
 
-	// // 强制 GC + 归还内存（验证用，确认无问题后可移除）
-	// runtime.GC()
-	// debug.FreeOSMemory()
+	// 强制 GC + 归还内存（验证用，确认无问题后可移除）
+	runtime.GC()
+	debug.FreeOSMemory()
 
-	// // 打印内存统计，验证内存回收情况
-	// var m runtime.MemStats
-	// runtime.ReadMemStats(&m)
-	// log.Printf("[Memory] HeapInUse: %.2f MB | HeapIdle: %.2f MB | HeapReleased: %.2f MB | HeapSys: %.2f MB | Sys(≈RSS): %.2f MB",
-	// 	float64(m.HeapInuse)/1024/1024,
-	// 	float64(m.HeapIdle)/1024/1024,
-	// 	float64(m.HeapReleased)/1024/1024,
-	// 	float64(m.HeapSys)/1024/1024,
-	// 	float64(m.Sys)/1024/1024,
-	// )
+	// 打印内存统计，验证内存回收情况
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Printf("[Memory] HeapInUse: %.2f MB | HeapIdle: %.2f MB | HeapReleased: %.2f MB | HeapSys: %.2f MB",
+		float64(m.HeapInuse)/1024/1024,
+		float64(m.HeapIdle)/1024/1024,
+		float64(m.HeapReleased)/1024/1024,
+		float64(m.HeapSys)/1024/1024,
+	)
 
 	return stats, processErr
 }
