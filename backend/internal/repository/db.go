@@ -30,15 +30,23 @@ func DropSearchIndexes() {
 // RebuildSearchIndexes 重建所有索引（在入库完成后执行，效率远高于边写边维护）
 func RebuildSearchIndexes() {
 	log.Println("[Perf] Rebuilding all strategic indexes...")
+
+	// 关键：创建索引前先降低 maintenance_work_mem，避免 OOM
+	// 低配服务器使用 32MB，足够创建索引但不会占用过多内存
+	DB.Exec("SET maintenance_work_mem = '32MB'")
+
 	sqls := []struct{ name, sql string }{
-		{"Search Phone", "CREATE INDEX idx_records_fast_phone ON records (batch_id, phone varchar_pattern_ops, row_index)"},
-		{"Search Name", "CREATE INDEX idx_records_fast_name ON records (batch_id, name varchar_pattern_ops, row_index)"},
-		{"Batch Pagination", "CREATE INDEX idx_records_batch_row ON records (batch_id, row_index)"},
+		{"Search Phone", "CREATE INDEX IF NOT EXISTS idx_records_fast_phone ON records (batch_id, phone varchar_pattern_ops, row_index)"},
+		{"Search Name", "CREATE INDEX IF NOT EXISTS idx_records_fast_name ON records (batch_id, name varchar_pattern_ops, row_index)"},
+		{"Batch Pagination", "CREATE INDEX IF NOT EXISTS idx_records_batch_row ON records (batch_id, row_index)"},
 	}
 	for _, item := range sqls {
 		start := time.Now()
-		DB.Exec(item.sql)
-		log.Printf("[Perf] %s indexed in %v", item.name, time.Since(start))
+		if err := DB.Exec(item.sql).Error; err != nil {
+			log.Printf("[Perf] %s index failed: %v (non-fatal, search may be slower)", item.name, err)
+		} else {
+			log.Printf("[Perf] %s indexed in %v", item.name, time.Since(start))
+		}
 	}
 }
 
@@ -109,6 +117,23 @@ func InitDB(dsn string) error {
 			log.Printf("Note (%s): %v", item.name, err)
 		} else {
 			log.Printf("[Init] %s optimized in %v.", item.name, time.Since(sSub))
+		}
+	}
+
+	// 5. 创建符合导论作业要求的逻辑视图
+	log.Println("Step 3/3: Creating logical views for compliance...")
+	views := []struct {
+		name string
+		sql  string
+	}{
+		{"Clean Employees", "CREATE OR REPLACE VIEW clean_employees AS SELECT * FROM records WHERE status = 'Clean'"},
+		{"Error Logs", "CREATE OR REPLACE VIEW error_logs AS SELECT * FROM records WHERE status = 'Error'"},
+	}
+	for _, v := range views {
+		if err := DB.Exec(v.sql).Error; err != nil {
+			log.Printf("Warning: Failed to create view %s: %v", v.name, err)
+		} else {
+			log.Printf("[Init] Logical View %s created.", v.name)
 		}
 	}
 

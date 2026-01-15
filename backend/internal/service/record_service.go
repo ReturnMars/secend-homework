@@ -7,78 +7,114 @@ import (
 	"time"
 
 	"etl-tool/internal/model"
+
+	"gorm.io/gorm"
 )
 
 // GetRecords 获取批次下的记录，支持过滤、搜索和分页
 func (s *CleanerService) GetRecords(batchID string, filter string, search string, page, pageSize int) ([]model.Record, int64, error) {
 	var records []model.Record
-	var total int64
+	search = strings.TrimSpace(search)
 
 	query := s.DB.Model(&model.Record{}).Where("batch_id = ?", batchID)
+	query = s.applyStatusFilter(query, filter)
+	query = s.applySearchFilter(query, search)
 
-	switch filter {
-	case "clean":
-		query = query.Where("status = ?", "Clean")
-	case "error":
-		query = query.Where("status != ?", "Clean")
-	}
-
-	isSearch := search != ""
-	isNumeric := false
-	if isSearch {
-		isNumeric = true
-		for _, c := range search {
-			if c < '0' || c > '9' {
-				isNumeric = false
-				break
-			}
-		}
-
-		if isNumeric && len(search) >= 3 {
-			// 全数字优先走 phone 索引 (精准或右模糊)
-			query = query.Where("phone LIKE ?", search+"%")
-		} else {
-			// 否则走 name 索引，且只用右模糊以保持索引有效 (Index Range Scan)
-			query = query.Where("name LIKE ?", search+"%")
-		}
-	}
-
-	// 核心加速：优化计数逻辑
-	if filter == "all" && !isSearch {
-		// 无过滤无搜索：直接查批次表，耗时 < 1ms
-		var batch model.ImportBatch
-		if err := s.DB.Select("total_rows").First(&batch, "id = ?", batchID).Error; err == nil {
-			total = int64(batch.TotalRows)
-		} else {
-			query.Count(&total)
-		}
-	} else {
-		// 搜索场景：如果页码是 1，采用“快速熔断计数”策略
-		if page == 1 && isSearch {
-			var count int64
-			var countErr error
-			if isNumeric && len(search) >= 3 {
-				countErr = s.DB.Raw("SELECT count(*) FROM (SELECT 1 FROM records WHERE batch_id = ? AND phone LIKE ? LIMIT 1001) AS t",
-					batchID, search+"%").Scan(&count).Error
-			} else {
-				countErr = s.DB.Raw("SELECT count(*) FROM (SELECT 1 FROM records WHERE batch_id = ? AND name LIKE ? LIMIT 1001) AS t",
-					batchID, search+"%").Scan(&count).Error
-			}
-
-			if countErr == nil {
-				total = count
-			} else {
-				query.Count(&total)
-			}
-		} else {
-			query.Count(&total)
-		}
-	}
+	total := s.countRecords(query, batchID, filter, search)
 
 	offset := (page - 1) * pageSize
 	err := query.Offset(offset).Limit(pageSize).Order("row_index asc").Find(&records).Error
 
 	return records, total, err
+}
+
+// applyStatusFilter 应用状态过滤条件
+func (s *CleanerService) applyStatusFilter(query *gorm.DB, filter string) *gorm.DB {
+	switch filter {
+	case "clean":
+		return query.Where("status = ?", "Clean")
+	case "error":
+		return query.Where("status != ?", "Clean")
+	default:
+		return query
+	}
+}
+
+// applySearchFilter 应用搜索条件
+func (s *CleanerService) applySearchFilter(query *gorm.DB, search string) *gorm.DB {
+	if search == "" {
+		return query
+	}
+
+	if s.isNumericSearch(search) {
+		return query.Where("phone LIKE ?", search+"%")
+	}
+
+	pattern := search + "%"
+	return query.Where(
+		"name LIKE ? OR province LIKE ? OR city LIKE ? OR district LIKE ?",
+		pattern, pattern, pattern, pattern,
+	)
+}
+
+// isNumericSearch 判断是否为纯数字搜索（用于手机号）
+func (s *CleanerService) isNumericSearch(search string) bool {
+	if len(search) < 3 {
+		return false
+	}
+	for _, c := range search {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// countRecords 优化的计数逻辑
+func (s *CleanerService) countRecords(query *gorm.DB, batchID, filter, search string) int64 {
+	// 无过滤无搜索：直接从 batch 表读取总行数，性能完美 (O(1))
+	if filter == "all" && search == "" {
+		var batch model.ImportBatch
+		if err := s.DB.Select("total_rows").First(&batch, "id = ?", batchID).Error; err == nil {
+			return int64(batch.TotalRows)
+		}
+	}
+
+	// 有过滤或搜索：执行数据库 Count，由于使用了索引覆盖，性能依然优秀
+	var total int64
+	query.Count(&total)
+	return total
+}
+
+// ValidateRecordUpdate 预先验证更新结果，回显状态变化
+func (s *CleanerService) ValidateRecordUpdate(id string, updates map[string]interface{}) (map[string]interface{}, error) {
+	var record model.Record
+	if err := s.DB.First(&record, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+
+	// 准备合并后的数据进行验证
+	newPhone := record.Phone
+	if v, ok := updates["phone"].(string); ok {
+		newPhone = v
+	}
+	newDate := record.Date
+	if v, ok := updates["date"].(string); ok {
+		newDate = v
+	}
+	newName := record.Name
+	if v, ok := updates["name"].(string); ok {
+		newName = v
+	}
+
+	newStatus, newError := ValidateRecord(newName, newPhone, newDate)
+
+	return map[string]interface{}{
+		"current_status": record.Status,
+		"new_status":     newStatus,
+		"new_error":      newError,
+		"has_changes":    s.hasChanges(&record, updates),
+	}, nil
 }
 
 // UpdateRecord 更新记录并创建历史版本
@@ -97,12 +133,47 @@ func (s *CleanerService) UpdateRecord(id string, updates map[string]interface{},
 	beforeBytes, _ := json.Marshal(record)
 	beforeJSON := string(beforeBytes)
 
-	// 应用更新
+	// 提取并清洗数据，准备同步状态
+	phone := record.Phone
+	if v, ok := updates["phone"].(string); ok {
+		phone = v
+	}
+	date := record.Date
+	if v, ok := updates["date"].(string); ok {
+		date = v
+	}
+	name := record.Name
+	if v, ok := updates["name"].(string); ok {
+		name = v
+	}
+
+	// 尝试清洗数据以持久化更好的格式
+	cleanedPhone, _ := CleanPhone(phone)
+	cleanedDate, _ := CleanDate(date)
+	cleanedName, _ := CleanName(name)
+
+	// 计算新状态
+	newStatus, newError := ValidateRecord(name, phone, date)
+
+	// 如果清洗成功，使用清洗后的值更新 map 以便存入数据库
+	if cleanedPhone != "" {
+		updates["phone"] = cleanedPhone
+	}
+	if cleanedDate != "" {
+		updates["date"] = cleanedDate
+	}
+	if cleanedName != "" {
+		updates["name"] = cleanedName
+	}
+	updates["status"] = newStatus
+	updates["error_message"] = newError
+
+	// 应用所有更新（包括状态字段）
 	if err := s.DB.Model(&record).Updates(updates).Error; err != nil {
 		return nil, err
 	}
 
-	// 重新获取更新后的状态
+	// 重新获取更新后的完整记录（包括 ID 和行索引等，以及 GORM 更新后的字段）
 	s.DB.First(&record, "id = ?", id)
 	afterBytes, _ := json.Marshal(record)
 	afterJSON := string(afterBytes)

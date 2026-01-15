@@ -11,10 +11,22 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pg_data:/var/lib/postgresql/data
+    # PostgreSQL 性能配置（通过环境变量控制）
+    # 低配服务器：PG_SHARED_BUFFERS=64MB PG_WORK_MEM=4MB
+    # 高配服务器：PG_SHARED_BUFFERS=256MB PG_WORK_MEM=16MB
+    command: >
+      postgres
+      -c shared_buffers=${PG_SHARED_BUFFERS:-128MB}
+      -c work_mem=${PG_WORK_MEM:-8MB}
+      -c maintenance_work_mem=${PG_MAINT_WORK_MEM:-64MB}
+      -c effective_cache_size=${PG_CACHE_SIZE:-256MB}
+      -c max_connections=${PG_MAX_CONN:-50}
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=8MB
     deploy:
       resources:
         limits:
-          memory: 300M
+          memory: ${DB_MEMORY:-512M}
     networks:
       - app_network
     logging:
@@ -36,7 +48,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: ${BACKEND_MEMORY:-1G}
     volumes:
       - ./config.yaml:/app/config.yaml
     networks:
@@ -58,7 +70,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 100M
+          memory: ${FRONTEND_MEMORY:-128M}
     networks:
       - app_network
     logging:

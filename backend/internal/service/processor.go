@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"etl-tool/internal/config"
 	"etl-tool/internal/model"
 	"etl-tool/internal/repository"
 	"etl-tool/internal/utils"
@@ -179,13 +178,55 @@ type processStats struct {
 	failedRows  int
 }
 
+// getAdaptiveConfig 根据系统资源自动计算最优配置
+func getAdaptiveConfig() (numWorkers int, numSavers int, bufferSize int, batchSize int) {
+	cpuCount := runtime.NumCPU()
+
+	// Worker 配置：核心数 * 2（CPU 密集型清洗任务）
+	numWorkers = cpuCount * 2
+	if numWorkers < 2 {
+		numWorkers = 2
+	}
+
+	// Saver 配置：核心数 / 2，最低 2（IO 密集型数据库写入）
+	numSavers = cpuCount / 2
+	if numSavers < 2 {
+		numSavers = 2
+	}
+
+	// 内存配置：根据可用内存调整
+	bufferSize = 20000 // 默认高性能
+	batchSize = 4000
+
+	// 尝试检测可用内存
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	availableMB := int(m.Sys / 1024 / 1024) // 系统分配给 Go 的总内存
+
+	// 根据内存调整参数
+	switch {
+	case availableMB < 256: // 极低内存模式
+		bufferSize = 2000
+		batchSize = 1000
+	case availableMB < 512: // 低内存模式
+		bufferSize = 5000
+		batchSize = 2000
+	case availableMB < 1024: // 中等内存
+		bufferSize = 10000
+		batchSize = 3000
+		// default: 保持高性能默认值
+	}
+
+	log.Printf("[Adaptive] CPU: %d, Workers: %d, Savers: %d, BufferSize: %d, BatchSize: %d (SysMem: %dMB)",
+		cpuCount, numWorkers, numSavers, bufferSize, batchSize, availableMB)
+
+	return
+}
+
 // processRows 采用高度并发的 Worker Pool 模式处理数据
 func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator, batchID uint, indices utils.ColIndices, skipRows int) (*processStats, error) {
-	numWorkers := runtime.NumCPU() * 2 // 充分利用多核 CPU
-	if numWorkers < 8 {
-		numWorkers = 8
-	}
-	const batchSize = 4000 // 极致调优：13 字段 * 4000 = 52000 < 65535
+	// 自适应配置
+	numWorkers, numSavers, bufferSize, batchSize := getAdaptiveConfig()
 
 	stats := &processStats{rowIdx: 0}
 	if skipRows > 0 {
@@ -198,9 +239,9 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 		idx int
 	}
 
-	// Channel 定义，设置缓冲区以控制内存占用
-	taskChan := make(chan task, 20000) // 增大缓冲区
-	resultChan := make(chan model.Record, 20000)
+	// Channel 定义，根据可用内存自动调整缓冲区大小
+	taskChan := make(chan task, bufferSize)
+	resultChan := make(chan model.Record, bufferSize)
 	errChan := make(chan error, 1)
 
 	var wg sync.WaitGroup
@@ -224,11 +265,7 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 		}()
 	}
 
-	// 2. 启动多个数据持久化协程 (并发写入)
-	numSavers := config.AppConfig.Database.BatchInsertConcurrency
-	if numSavers <= 0 {
-		numSavers = 2 // 默认兜底值
-	}
+	// 2. 启动多个数据持久化协程 (并发写入，数量由 getAdaptiveConfig 自动计算)
 	var saverWg sync.WaitGroup
 	saveDone := make(chan struct{})
 
@@ -320,11 +357,13 @@ Loop:
 	for iter.Next() {
 		stats.rowIdx++
 
-		// 每 100 万行打印一次实时吞吐量
-		if stats.rowIdx%1000000 == 0 {
+		// 每 10 万行更新一次实时吞吐量（适应不同数据量）
+		if stats.rowIdx%100000 == 0 {
 			elapsed := time.Since(lastLogTime)
-			bps := float64(1000000) / elapsed.Seconds()
-			log.Printf("[Performance] Processed 1,000,000 rows, current speed: %.2f rows/sec", bps)
+			bps := float64(100000) / elapsed.Seconds()
+			if stats.rowIdx%1000000 == 0 {
+				log.Printf("[Performance] Processed %d rows, current speed: %.2f rows/sec", stats.rowIdx, bps)
+			}
 			s.batchSpeeds.Store(batchID, bps)
 			lastLogTime = time.Now()
 		}
@@ -387,16 +426,19 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 	rec := model.Record{
 		BatchID:  batchID,
 		RowIndex: rowIdx,
-		Name:     utils.Truncate(rawName, 255),
 		Address:  utils.Truncate(rawAddress, 255),
 	}
 
+	// 清洗姓名（应用 Emoji 过滤等规则）
+	cleanName, _ := CleanName(rawName)
+	rec.Name = utils.Truncate(cleanName, 255)
+
 	// 清洗手机号
-	cleanPhone, errPhone := CleanPhone(rawPhone)
+	cleanPhone, _ := CleanPhone(rawPhone)
 	rec.Phone = utils.Truncate(cleanPhone, 50)
 
 	// 清洗日期
-	cleanDate, errDate := CleanDate(rawDate)
+	cleanDate, _ := CleanDate(rawDate)
 	rec.Date = utils.Truncate(cleanDate, 50)
 
 	// 提取地址信息
@@ -405,21 +447,8 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 	rec.City = utils.Truncate(c, 100)
 	rec.District = utils.Truncate(d, 100)
 
-	// 验证状态
-	var errors []string
-	if errPhone != nil {
-		errors = append(errors, fmt.Sprintf("Phone: %v", errPhone))
-	}
-	if errDate != nil {
-		errors = append(errors, fmt.Sprintf("Date: %v", errDate))
-	}
-
-	if len(errors) > 0 {
-		rec.Status = "Error"
-		rec.ErrorMessage = fmt.Sprintf("%v", errors)
-	} else {
-		rec.Status = "Clean"
-	}
+	// 统一验证
+	rec.Status, rec.ErrorMessage = ValidateRecord(rawName, rawPhone, rawDate)
 
 	return rec
 }

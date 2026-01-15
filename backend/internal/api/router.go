@@ -107,6 +107,7 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 			protected.POST("/batches/:id/cancel", h.CancelBatch)
 
 			protected.PUT("/records/:id", h.UpdateRecord)
+			protected.POST("/records/:id/validate", h.ValidateRecord)
 			protected.GET("/records/:id/history", h.GetRecordHistory)
 			protected.POST("/records/:id/rollback/:version_id", h.RollbackRecord)
 			protected.PATCH("/versions/:id/reason", h.UpdateVersionReason)

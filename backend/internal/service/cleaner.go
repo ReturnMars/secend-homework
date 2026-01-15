@@ -13,7 +13,27 @@ var (
 	regexDate = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
 	// regexAddress 提取省市区的启发式正则
 	regexAddress = regexp.MustCompile(`^([^省]+省|[^自治区]+自治区|[^市]+市)([^市]+市|[^州]+州|[^县]+县|[^盟]+盟)?([^区]+区|[^县]+县|[^旗]+旗)?`)
+	// regexNormalName 匹配正常姓名字符：中文、字母、数字、空格、点、下划线
+	regexNormalName = regexp.MustCompile(`[^\p{Han}a-zA-Z0-9\s._-]`)
 )
+
+// CleanName 清洗并验证姓名
+func CleanName(name string) (string, error) {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		return "", fmt.Errorf("name cannot be empty")
+	}
+
+	// 过滤特殊字符和 Emoji (保留中文、英文、数字、基本分隔符)
+	cleaned := regexNormalName.ReplaceAllString(s, "")
+
+	if len(cleaned) < len(s) {
+		// 如果有字符被剔除，说明含有异常符号
+		return cleaned, fmt.Errorf("contains invalid characters or emojis")
+	}
+
+	return cleaned, nil
+}
 
 // CleanPhone 尝试清洗并规范化手机号
 func CleanPhone(phone string) (string, error) {
@@ -106,4 +126,29 @@ func ExtractAddress(addr string) (province, city, district string) {
 	}
 
 	return province, city, district
+}
+
+// ValidateRecord 预判记录在清洗后的状态和错误信息
+func ValidateRecord(name, phone, date string) (status string, errorMessage string) {
+	var errors []string
+
+	_, errName := CleanName(name)
+	if errName != nil {
+		errors = append(errors, fmt.Sprintf("Name: %v", errName))
+	}
+
+	_, errPhone := CleanPhone(phone)
+	if errPhone != nil {
+		errors = append(errors, fmt.Sprintf("Phone: %v", errPhone))
+	}
+
+	_, errDate := CleanDate(date)
+	if errDate != nil {
+		errors = append(errors, fmt.Sprintf("Date: %v", errDate))
+	}
+
+	if len(errors) > 0 {
+		return "Error", fmt.Sprintf("%v", errors)
+	}
+	return "Clean", ""
 }

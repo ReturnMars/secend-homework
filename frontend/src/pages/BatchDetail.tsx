@@ -89,6 +89,9 @@ export default function BatchDetail() {
     setTempReason,
     rollbackVersionId,
     setRollbackVersionId,
+    validationResult,
+    setValidationResult,
+    isSubmitting,
     handleEditClick,
     handleSaveEdit,
     handleRollback,
@@ -162,6 +165,9 @@ export default function BatchDetail() {
         rollbackVersionId={rollbackVersionId}
         setRollbackVersionId={setRollbackVersionId}
         handleRollback={handleRollback}
+        validationResult={validationResult}
+        setValidationResult={setValidationResult}
+        isSubmitting={isSubmitting}
       />
     </div>
   );

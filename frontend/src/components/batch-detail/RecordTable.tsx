@@ -87,10 +87,10 @@ export function RecordTable({
             </TabsList>
           </Tabs>
 
-          <div className="relative w-72 h-8 group">
+          <div className="relative w-80 h-8 group">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 group-focus-within:text-primary transition-colors" />
             <Input
-              placeholder="Keyword search (name, phone, area...)"
+              placeholder="搜索姓名、手机、地区..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -125,10 +125,10 @@ export function RecordTable({
                   <TableHead className="w-[90px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody className="h-[54vh]">
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-[400px] text-center">
+                  <TableRow className="h-full">
+                    <TableCell colSpan={7} className="text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <div className="h-8 w-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
                         <p className="text-sm font-medium text-muted-foreground/80">
@@ -138,10 +138,10 @@ export function RecordTable({
                     </TableCell>
                   </TableRow>
                 ) : records.length === 0 ? (
-                  <TableRow>
+                  <TableRow className="h-full">
                     <TableCell
                       colSpan={7}
-                      className="h-[400px] text-center text-muted-foreground"
+                      className="h-full text-center text-muted-foreground"
                     >
                       No records found for this filter.
                     </TableCell>
@@ -237,9 +237,36 @@ export function RecordTable({
         </OverlayScrollbarsComponent>
 
         {/* Pagination */}
-        <div className="pt-2 border-t">
-          <Pagination>
+        <div className="py-2 px-4 border-t flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">
+            共{" "}
+            <span className="font-medium text-foreground">
+              {total.toLocaleString()}
+            </span>{" "}
+            条记录， 第{" "}
+            <span className="font-medium text-foreground">{page}</span> /{" "}
+            <span className="font-medium text-foreground">
+              {Math.ceil(total / pageSize) || 1}
+            </span>{" "}
+            页
+          </div>
+
+          <Pagination className="w-auto mx-0">
             <PaginationContent>
+              {/* 首页 */}
+              <PaginationItem>
+                <PaginationLink
+                  onClick={() => setPage(1)}
+                  aria-disabled={page === 1}
+                  className={
+                    page === 1
+                      ? "pointer-events-none opacity-50"
+                      : "cursor-pointer"
+                  }
+                >
+                  «
+                </PaginationLink>
+              </PaginationItem>
               <PaginationItem>
                 <PaginationPrevious
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -264,7 +291,8 @@ export function RecordTable({
                       <PaginationLink
                         isActive={page === p}
                         onClick={() => setPage(p)}
-                        className="cursor-pointer"
+                        size="default"
+                        className="cursor-pointer px-3 h-8 min-w-[40px]"
                       >
                         {p}
                       </PaginationLink>
@@ -284,8 +312,44 @@ export function RecordTable({
                   }
                 />
               </PaginationItem>
+              {/* 末页 */}
+              <PaginationItem>
+                <PaginationLink
+                  onClick={() => setPage(Math.ceil(total / pageSize) || 1)}
+                  aria-disabled={page * pageSize >= total}
+                  className={
+                    page * pageSize >= total
+                      ? "pointer-events-none opacity-50"
+                      : "cursor-pointer"
+                  }
+                >
+                  »
+                </PaginationLink>
+              </PaginationItem>
             </PaginationContent>
           </Pagination>
+
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">跳转</span>
+            <Input
+              type="number"
+              min={1}
+              max={Math.ceil(total / pageSize) || 1}
+              className="w-16 h-7 text-center text-xs"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const target = e.target as HTMLInputElement;
+                  const value = parseInt(target.value, 10);
+                  const totalPages = Math.ceil(total / pageSize) || 1;
+                  if (value >= 1 && value <= totalPages) {
+                    setPage(value);
+                    target.value = "";
+                  }
+                }
+              }}
+            />
+            <span className="text-muted-foreground">页</span>
+          </div>
         </div>
       </CardContent>
     </Card>

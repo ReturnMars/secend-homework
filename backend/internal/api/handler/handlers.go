@@ -375,6 +375,26 @@ func (h *CsvHandler) UpdateRecord(c *gin.Context) {
 	utils.SuccessResponse(c, record)
 }
 
+// ValidateRecord 验证记录更并预判状态
+func (h *CsvHandler) ValidateRecord(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Updates map[string]interface{} `json:"updates"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.Service.ValidateRecordUpdate(id, req.Updates)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.SuccessResponse(c, result)
+}
+
 // RollbackRecord handles record rollback
 func (h *CsvHandler) RollbackRecord(c *gin.Context) {
 	id := c.Param("id")

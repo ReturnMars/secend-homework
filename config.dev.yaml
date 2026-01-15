@@ -13,7 +13,12 @@ database:
   port: 5436
   ssl_mode: "disable"
   timezone: "Asia/Shanghai"
-  batch_insert_concurrency: 8 # 写入并发数，默认 2，高性能机可调大
+  # PostgreSQL 性能参数（高配开发机）
+  shared_buffers: "256MB"
+  work_mem: "16MB"
+  maintenance_work_mem: "128MB"
+  effective_cache_size: "512MB"
+  max_connections: 100
 
 # ------------------------------------------------------------------------------
 # 2. 后端服务配置 (Go / Gin)
@@ -29,4 +34,4 @@ server:
 # ------------------------------------------------------------------------------
 frontend:
   api_base_url: "/api"
-  external_port: 5173 # 生产环境访问端口，如 80 或 443
+  external_port: 5173 # 开发环境 Vite 端口

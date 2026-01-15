@@ -21,6 +21,7 @@ interface Batch {
   total_rows: number;
   success_count: number;
   created_at: string;
+  error?: string; // 失败时的错误信息
 }
 
 interface BatchRowProps {
@@ -37,6 +38,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
   const [status, setStatus] = useState(initialBatch.status);
   const [successCount, setSuccessCount] = useState(initialBatch.success_count);
   const [totalRows, setTotalRows] = useState(initialBatch.total_rows);
+  const [errorMessage, setErrorMessage] = useState(initialBatch.error || "");
   const [metrics, setMetrics] = useState({
     speed: 0,
     eta: 0,
@@ -90,6 +92,9 @@ export const BatchRow: React.FC<BatchRowProps> = ({
         }
 
         if (data.status === "Completed" || data.status === "Failed") {
+          if (data.error) {
+            setErrorMessage(data.error);
+          }
           evtSource.close();
           if (onStatusChange) onStatusChange();
         }
@@ -191,6 +196,18 @@ export const BatchRow: React.FC<BatchRowProps> = ({
               <Loader2 className="h-2 w-2 ml-1 animate-spin" />
             )}
           </Badge>
+
+          {/* Failed 状态显示错误信息 */}
+          {status === "Failed" && errorMessage && (
+            <span
+              className="text-xs text-red-500 truncate max-w-[200px]"
+              title={errorMessage}
+            >
+              {errorMessage.length > 30
+                ? errorMessage.substring(0, 30) + "..."
+                : errorMessage}
+            </span>
+          )}
 
           {/* Actions Inline */}
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">

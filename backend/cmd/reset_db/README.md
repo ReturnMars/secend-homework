@@ -1,28 +1,40 @@
-# Database Reset Tool (数据库重置工具)
+# Reset Database Tool
 
-这是一个用于开发环境下快速清空 ETL 业务数据的维护工具。
+用于重置数据库中的业务数据表，保留用户表。
 
-## 📍 位置
+## ⚠️ 警告
 
-`backend/cmd/reset_db/main.go`
+此工具会 **永久删除** 以下表中的所有数据：
 
-## 🛠️ 功能
+- `records`
+- `record_versions`
+- `import_batches`
 
-- **物理清空表**: 强制清空 `records` (千万级数据表), `record_versions`, `import_batches`。
-- **重置自增 ID**: 使用 `RESTART IDENTITY` 将主键 ID 恢复从 1 开始。
-- **安全保护**: 仅允许在 `APP_ENV=dev` 环境下执行，防止生产环境误操作。
-- **保留账号**: 不会触碰 `users` 表，管理员及测试账号依然有效。
+---
 
-## 🚀 如何运行
-
-在 `backend` 目录下执行：
+## 开发环境 (Dev)
 
 ```bash
-go run cmd/reset_db/main.go
+# 从 backend/ 目录运行
+go run ./cmd/reset_db
 ```
 
-## ⚠️ 注意事项
+**安全机制**：只有当 `APP_ENV=dev` 或未设置时才能运行。
 
-1. **不可逆**: 执行后数据将永久删除，请确保已备份重要测试数据。
-2. **环境校验**: 如果在生产环境运行，程序将报错：`[CRITICAL] Database reset is only allowed in 'dev' environment.`
-3. **依赖关系**: 使用 `CASCADE` 自动处理外键关联，确保清理彻底。
+---
+
+## 生产环境 (Prod) 🔴
+
+通过 SSH 连接服务器并在 Docker 容器内执行 SQL：
+
+```bash
+# 连接服务器
+ssh root@47.109.195.0
+
+# 进入项目目录
+cd /root/apps/etl-tool
+
+# 通过 docker compose 进入 PostgreSQL 容器执行 SQL
+docker compose -f docker-compose.prod.yml exec db psql -U postgres -d etl_db -c \
+  "TRUNCATE TABLE records, record_versions, import_batches RESTART IDENTITY CASCADE;"
+```

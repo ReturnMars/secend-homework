@@ -11,7 +11,7 @@ func main() {
 	// 1. Load Config
 	cfg := config.LoadConfig()
 
-	// 2. Safety Check
+	// 2. Safety Check - Only allow in dev environment
 	env := os.Getenv("APP_ENV")
 	if env == "" {
 		env = "dev"
@@ -25,10 +25,8 @@ func main() {
 		log.Fatal("Failed to init DB:", err)
 	}
 
-	// 3. Destructive Clear
-	log.Println("[CAUTION] Resetting all business data in 3 seconds...")
-	// Wait a bit to allow cancellation if run by mistake
-	// (But this is a CLI tool, so we assume intent)
+	// 4. Destructive Clear
+	log.Println("[CAUTION] Resetting all business data in DEVELOPMENT database...")
 
 	tables := []string{
 		"records",
@@ -44,6 +42,6 @@ func main() {
 		}
 	}
 
-	log.Println("Database reset successful. Users table preserved.")
+	log.Println("✅ Database reset successful. Users table preserved.")
 	os.Exit(0)
 }

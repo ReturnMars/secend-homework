@@ -20,7 +20,12 @@ import (
 // Config 结构体，用于解析 config.yaml
 type Config struct {
 	Database struct {
-		Password string `yaml:"password"`
+		Password           string `yaml:"password"`
+		SharedBuffers      string `yaml:"shared_buffers"`
+		WorkMem            string `yaml:"work_mem"`
+		MaintenanceWorkMem string `yaml:"maintenance_work_mem"`
+		EffectiveCacheSize string `yaml:"effective_cache_size"`
+		MaxConnections     int    `yaml:"max_connections"`
 	} `yaml:"database"`
 	Frontend struct {
 		APIBaseURL   string `yaml:"api_base_url"`
@@ -32,6 +37,11 @@ type Config struct {
 		SSHKeyPath     string `yaml:"ssh_key_path"`
 		RemotePassword string `yaml:"remote_password"`
 		DeployPath     string `yaml:"deploy_path"`
+		Limits         struct {
+			MemoryDB       string `yaml:"memory_db"`
+			MemoryBackend  string `yaml:"memory_backend"`
+			MemoryFrontend string `yaml:"memory_frontend"`
+		} `yaml:"limits"`
 	} `yaml:"deploy"`
 }
 
@@ -70,16 +80,34 @@ func main() {
 		backendTar,
 		dbTar,
 		"infra/docker-compose.prod.yml",
-		"config.yaml",
+		"config.prod.yaml",
 	})
 
 	// 8. 远程解包并部署
 	fmt.Println("🏗️  Remote Loading and Deployment...")
+
+	// 构建环境变量字符串
+	envVars := fmt.Sprintf(
+		"DB_PASSWORD=%s FRONTEND_PORT=%d "+
+			"DB_MEMORY=%s BACKEND_MEMORY=%s FRONTEND_MEMORY=%s "+
+			"PG_SHARED_BUFFERS=%s PG_WORK_MEM=%s PG_MAINT_WORK_MEM=%s "+
+			"PG_CACHE_SIZE=%s PG_MAX_CONN=%d",
+		cfg.Database.Password, cfg.Frontend.ExternalPort,
+		getOrDefault(cfg.Deploy.Limits.MemoryDB, "512M"),
+		getOrDefault(cfg.Deploy.Limits.MemoryBackend, "1G"),
+		getOrDefault(cfg.Deploy.Limits.MemoryFrontend, "128M"),
+		getOrDefault(cfg.Database.SharedBuffers, "128MB"),
+		getOrDefault(cfg.Database.WorkMem, "8MB"),
+		getOrDefault(cfg.Database.MaintenanceWorkMem, "64MB"),
+		getOrDefault(cfg.Database.EffectiveCacheSize, "256MB"),
+		getIntOrDefault(cfg.Database.MaxConnections, 50),
+	)
+
 	commands := []string{
 		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, frontendTar),
 		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, backendTar),
 		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, dbTar),
-		fmt.Sprintf("cd %s && DB_PASSWORD=%s FRONTEND_PORT=%d docker compose -f docker-compose.prod.yml up -d --remove-orphans", cfg.Deploy.DeployPath, cfg.Database.Password, cfg.Frontend.ExternalPort),
+		fmt.Sprintf("cd %s && %s docker compose -f docker-compose.prod.yml up -d --remove-orphans", cfg.Deploy.DeployPath, envVars),
 		"docker system prune -f",
 	}
 	for _, cmd := range commands {
@@ -102,9 +130,9 @@ func main() {
 }
 
 func loadConfig() *Config {
-	data, err := os.ReadFile("../config.yaml")
+	data, err := os.ReadFile("../config.prod.yaml")
 	if err != nil {
-		log.Fatalf("❌ Failed to read config.yaml: %v", err)
+		log.Fatalf("❌ Failed to read config.prod.yaml: %v", err)
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -134,11 +162,21 @@ func buildBackend() {
 func prepareImages() {
 	fmt.Println("🐳 Building Docker Images...")
 
-	// Frontend Image
+	// 检测代理配置（Clash Verge 默认端口 7897）
+	proxy := os.Getenv("HTTP_PROXY")
+	if proxy == "" {
+		proxy = "http://host.docker.internal:7897"
+	}
+
+	// Frontend Image (nginx 不需要代理)
 	runCommand(exec.Command("docker", "build", "-t", "etl-tool-frontend:latest", "-f", "../infra/Dockerfile.frontend", ".."))
 
-	// Backend Image
-	runCommand(exec.Command("docker", "build", "-t", "etl-tool-backend:latest", "-f", "../infra/Dockerfile.backend", ".."))
+	// Backend Image (需要代理来安装 apk 包)
+	runCommand(exec.Command("docker", "build",
+		"--build-arg", "HTTP_PROXY="+proxy,
+		"--build-arg", "HTTPS_PROXY="+proxy,
+		"-t", "etl-tool-backend:latest",
+		"-f", "../infra/Dockerfile.backend", ".."))
 }
 
 func saveAndCompressImage(imageTag, outputFile string) {
@@ -213,7 +251,7 @@ func uploadFiles(sshClient *ssh.Client, remotePath string, files []string) {
 	for _, file := range files {
 		localFile := file
 		// 处理不在当前目录的任务文件路径
-		if strings.Contains(file, "/") || file == "config.yaml" {
+		if strings.Contains(file, "/") || strings.HasPrefix(file, "config") {
 			localFile = filepath.Join("..", file)
 		}
 
@@ -263,4 +301,20 @@ func runCommand(cmd *exec.Cmd) {
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("❌ Execution failed: %v", err)
 	}
+}
+
+// getOrDefault 返回字符串值，如果为空则返回默认值
+func getOrDefault(val, defaultVal string) string {
+	if val == "" {
+		return defaultVal
+	}
+	return val
+}
+
+// getIntOrDefault 返回整数值，如果为 0 则返回默认值
+func getIntOrDefault(val, defaultVal int) int {
+	if val == 0 {
+		return defaultVal
+	}
+	return val
 }

@@ -10,6 +10,16 @@ services:
       POSTGRES_PASSWORD: 123456
       POSTGRES_DB: csv_cleaner
       POSTGRES_HOST_AUTH_METHOD: trust
+    # 高配开发机 PostgreSQL 参数
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c effective_cache_size=512MB
+      -c max_connections=100
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
     ports:
       - "5436:5432"
     volumes:

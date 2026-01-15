@@ -5,6 +5,9 @@ import {
   FileText,
   RotateCcw,
   Check,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +54,7 @@ interface EditRecordSheetProps {
   editingRecord: Record | null;
   setEditingRecord: (record: Record | null) => void;
   form: UseFormReturn<any>;
-  handleSaveEdit: (values: any) => Promise<void>;
+  handleSaveEdit: (values: any, confirmed?: any) => Promise<void>;
   history: RecordVersion[];
   editingVersionId: number | null;
   setEditingVersionId: (id: number | null) => void;
@@ -61,6 +64,14 @@ interface EditRecordSheetProps {
   rollbackVersionId: number | null;
   setRollbackVersionId: (id: number | null) => void;
   handleRollback: (versionId: number) => Promise<void>;
+  validationResult: {
+    current_status: string;
+    new_status: string;
+    new_error: string;
+    has_changes: boolean;
+  } | null;
+  setValidationResult: (res: any | null) => void;
+  isSubmitting: boolean;
 }
 
 export function EditRecordSheet({
@@ -77,6 +88,9 @@ export function EditRecordSheet({
   rollbackVersionId,
   setRollbackVersionId,
   handleRollback,
+  validationResult,
+  setValidationResult,
+  isSubmitting,
 }: EditRecordSheetProps) {
   const renderDiff = (before: string, after: string) => {
     try {
@@ -464,25 +478,30 @@ export function EditRecordSheet({
                           )}
                         />
 
+                        {/* 移除旧的内联 AnimatePresence 面板 */}
+
                         <div className="pt-4 flex items-center justify-end gap-3">
                           <SheetClose asChild>
                             <Button
                               variant="outline"
                               type="button"
-                              onClick={() => setEditingRecord(null)}
+                              onClick={() => {
+                                setEditingRecord(null);
+                                setValidationResult(null);
+                              }}
                             >
                               Cancel
                             </Button>
                           </SheetClose>
-                          <Button
-                            type="submit"
-                            disabled={form.formState.isSubmitting}
-                            className="min-w-[120px]"
-                          >
-                            {form.formState.isSubmitting
-                              ? "Saving..."
-                              : "Save Changes"}
-                          </Button>
+                          {!validationResult && (
+                            <Button
+                              type="submit"
+                              disabled={isSubmitting}
+                              className="min-w-[120px]"
+                            >
+                              {isSubmitting ? "Checking..." : "Save Changes"}
+                            </Button>
+                          )}
                         </div>
                       </form>
                     </Form>
@@ -601,6 +620,112 @@ export function EditRecordSheet({
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog
+        open={validationResult !== null}
+        onOpenChange={(open) => !open && setValidationResult(null)}
+      >
+        <AlertDialogContent className="max-w-[440px] gap-6 rounded-2xl shadow-2xl border-white/10 backdrop-blur-md bg-background/95">
+          <AlertDialogHeader className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div
+                className={cn(
+                  "p-2 rounded-full",
+                  validationResult?.new_status === "Clean"
+                    ? "bg-green-100 dark:bg-green-950/50"
+                    : "bg-red-100 dark:bg-red-950/50"
+                )}
+              >
+                {validationResult?.new_status === "Clean" ? (
+                  <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                )}
+              </div>
+              <AlertDialogTitle className="text-xl font-bold tracking-tight">
+                {validationResult?.new_status === "Clean"
+                  ? "验证通过"
+                  : "仍存在数据验证问题"}
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-sm leading-relaxed text-muted-foreground/90">
+              系统已根据您的修改进行了即时同步校验，结果发现该记录的状态将发生如下变化：
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-xl border bg-accent/30 dark:bg-accent/10 border-white/5">
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground opacity-60">
+                  当前状态
+                </span>
+                <p
+                  className={cn(
+                    "text-sm font-mono font-extrabold",
+                    validationResult?.current_status === "Clean"
+                      ? "text-green-600 dark:text-green-500"
+                      : "text-red-600 dark:text-red-500"
+                  )}
+                >
+                  {validationResult?.current_status}
+                </p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-muted-foreground/40" />
+              <div className="flex flex-col space-y-1.5 text-right items-end">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground opacity-60">
+                  更新后
+                </span>
+                <Badge
+                  variant={
+                    validationResult?.new_status === "Clean"
+                      ? "outline"
+                      : "destructive"
+                  }
+                  className={cn(
+                    "font-mono h-6 transition-all",
+                    validationResult?.new_status === "Clean" &&
+                      "bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20"
+                  )}
+                >
+                  {validationResult?.new_status === "Clean" ? "Clean" : "Error"}
+                </Badge>
+              </div>
+            </div>
+
+            {validationResult?.new_error && (
+              <div className="p-3.5 rounded-xl border border-red-500/20 bg-red-500/5 transition-all">
+                <div className="flex gap-2 items-start">
+                  <span className="text-red-500 font-bold text-xs mt-0.5">
+                    !
+                  </span>
+                  <p className="text-[11px] leading-relaxed text-red-500/90 font-medium">
+                    {validationResult.new_error}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <AlertDialogFooter className="sm:justify-end gap-2 pt-2">
+            <AlertDialogCancel className="h-10 rounded-xl hover:bg-accent border-none bg-accent/50 text-sm font-medium transition-colors">
+              返回修改
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(
+                "h-10 px-6 rounded-xl text-sm font-bold shadow-lg shadow-primary/20 transition-all active:scale-95",
+                validationResult?.new_status === "Clean"
+                  ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-950 hover:opacity-90"
+                  : "bg-red-600 hover:bg-red-700 text-white"
+              )}
+              onClick={form.handleSubmit((values) =>
+                handleSaveEdit(values, true)
+              )}
+            >
+              确认并提交
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={rollbackVersionId !== null}

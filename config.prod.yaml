@@ -13,7 +13,12 @@ database:
   port: 5432
   ssl_mode: "disable"
   timezone: "Asia/Shanghai"
-  batch_insert_concurrency: 2 # 写入并发数，默认 2，高性能机可调大
+  # PostgreSQL 性能参数（根据服务器配置调整）
+  shared_buffers: "64MB" # 低配: 64MB, 高配: 256MB
+  work_mem: "4MB" # 低配: 4MB, 高配: 16MB
+  maintenance_work_mem: "32MB" # 低配: 32MB, 高配: 128MB
+  effective_cache_size: "128MB" # 低配: 128MB, 高配: 512MB
+  max_connections: 20 # 低配: 20, 高配: 100
 
 # ------------------------------------------------------------------------------
 # 2. 后端服务配置 (Go / Gin)
@@ -40,7 +45,8 @@ deploy:
   ssh_key_path: "~/.ssh/id_rsa"
   remote_password: "Aioreturn@123" # 填写您的服务器密码
   deploy_path: "/root/apps/etl-tool"
-  # 资源限制策略
+  # 资源限制策略（根据服务器配置调整）
   limits:
-    memory_db: "400M"
-    memory_backend: "1.2G"
+    memory_db: "256M" # 低配: 256M, 高配: 1G
+    memory_backend: "512M" # 低配: 512M, 高配: 2G
+    memory_frontend: "64M" # Nginx 静态服务
