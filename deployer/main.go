@@ -110,9 +110,9 @@ func main() {
 	)
 
 	commands := []string{
-		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, frontendTar),
-		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, backendTar),
-		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, dbTar),
+		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, filepath.Base(frontendTar)),
+		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, filepath.Base(backendTar)),
+		fmt.Sprintf("cd %s && docker load -i %s", cfg.Deploy.DeployPath, filepath.Base(dbTar)),
 		fmt.Sprintf("cd %s && %s docker compose -f docker-compose.prod.yml up -d --remove-orphans", cfg.Deploy.DeployPath, envVars),
 		"docker system prune -f",
 	}

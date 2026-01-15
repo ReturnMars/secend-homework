@@ -29,3 +29,5 @@ deployer/.cache
 *.sln
 *.sw?
 go.sum
+main-linux
+main.exe
