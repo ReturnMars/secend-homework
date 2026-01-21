@@ -35,6 +35,7 @@ type ImportBatch struct {
 	CompletedAt      *time.Time     `json:"completed_at"` // Pointer to allow null
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
 	Error            string         `gorm:"type:text" json:"error"` // 存储失败原因
+	Rules            string         `gorm:"type:text" json:"rules"` // JSON 清洗规则
 }
 
 // Record represents a single row from the CSV

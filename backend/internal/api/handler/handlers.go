@@ -41,24 +41,16 @@ func (h *CsvHandler) CheckHash(c *gin.Context) {
 
 	existingBatch, err := h.Service.FindBatchByHash(body.Hash)
 	if err == nil && existingBatch != nil {
-		// 关键加固：不仅检查数据库，还要检查物理文件是否真的还在 uploads 目录里
+		// 仅检查物理文件是否真的还在 uploads 目录里
 		if _, err := os.Stat(existingBatch.FilePath); err == nil {
-			log.Printf("[Instant Check] Physical file exists for Hash %s. BatchID: %d", body.Hash, existingBatch.ID)
-
-			// 自动唤醒：如果处于 Pending/Failed/Processing 状态，重新拉起处理程序
-			if existingBatch.Status != model.BatchStatusCompleted {
-				log.Printf("[Instant Check] Batch %d not completed (%s). Awakening pipeline...", existingBatch.ID, existingBatch.Status)
-				h.Service.ProcessFileAsync(existingBatch.ID, existingBatch.FilePath)
-			}
+			log.Printf("[Instant Check] Physical file exists for Hash %s. Ready for de-duplication.", body.Hash)
 
 			utils.SuccessResponse(c, gin.H{
-				"exists":   true,
-				"batch_id": existingBatch.ID,
-				"status":   existingBatch.Status,
+				"exists": true,
 			})
 			return
 		}
-		// 如果记录存在但文件离奇失踪，认为不存在，允许用户通过上传重新找回物理文件
+		// 如果记录存在但文件离奇失踪，认为不存在
 		log.Printf("[Instant Check] Record exists but physical file is missing: %s", existingBatch.FilePath)
 	}
 
@@ -82,6 +74,7 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 	var savedPath string
 	var originalName string
 	var fileHash string
+	var cleaningRules string
 	var reused bool
 
 	// 遍历 multipart 部分
@@ -102,6 +95,24 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 			io.Copy(buf, part)
 			fileHash = buf.String()
 			log.Printf("[Upload] Received fingerprint from client: %s", fileHash)
+			continue
+		}
+
+		// 处理 Rules 字段
+		if part.FormName() == "rules" {
+			buf := new(strings.Builder)
+			io.Copy(buf, part)
+			cleaningRules = buf.String()
+			log.Printf("[Upload] Received custom cleaning rules from client")
+			continue
+		}
+
+		// 处理 filename 字段 (针对快传模式，前端会单独传一个文件名)
+		if part.FormName() == "filename" {
+			buf := new(strings.Builder)
+			io.Copy(buf, part)
+			originalName = buf.String()
+			log.Printf("[Upload] Received filename from client: %s", originalName)
 			continue
 		}
 
@@ -138,19 +149,23 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 
 			existingBatch, err := h.Service.FindBatchByHash(fileHash)
 			if err == nil && existingBatch != nil {
-				os.Remove(tempPath) // Remove the temporary file as it's a duplicate
-				log.Printf("[Upload] Duplicate file detected (Hash: %s). Re-using existing batch %d.", fileHash, existingBatch.ID)
+				os.Remove(tempPath) // Remove the temporary file as we'll use the existing one
+				log.Printf("[Upload] Physical file exists (Hash: %s). Creating NEW batch from existing file.", fileHash)
 
-				// 关键加固：如果该批次没处理完，利用秒传机会“唤醒”处理协程
-				if existingBatch.Status != model.BatchStatusCompleted {
-					log.Printf("[Upload] Batch %d is in state %s. Re-triggering processing pipeline...", existingBatch.ID, existingBatch.Status)
-					h.Service.ProcessFileAsync(existingBatch.ID, existingBatch.FilePath)
+				// Create NEW Batch Record instead of re-using old one
+				username := c.GetString("username")
+				batch, err := h.Service.CreateBatchFromHash(originalName, username, fileHash, cleaningRules)
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create new batch from existing file: " + err.Error()})
+					return
 				}
 
+				// Trigger Async Processing for the NEW batch
+				h.Service.ProcessFileAsync(batch.ID, batch.FilePath)
+
 				utils.SuccessResponse(c, gin.H{
-					"message":  "File already uploaded, re-using existing batch and ensuring processing.",
-					"batch_id": existingBatch.ID,
-					"status":   existingBatch.Status,
+					"message":  "File bits already on server, created new batch for processing.",
+					"batch_id": batch.ID,
 					"reused":   true,
 				})
 				return
@@ -172,13 +187,29 @@ func (h *CsvHandler) Upload(c *gin.Context) {
 	}
 
 	if savedPath == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file field found in form"})
+		// 如果没有文件流但是有 Hash 和 OriginalName，说明是快传模式
+		if fileHash != "" && originalName != "" {
+			username := c.GetString("username")
+			batch, err := h.Service.CreateBatchFromHash(originalName, username, fileHash, cleaningRules)
+			if err == nil {
+				h.Service.ProcessFileAsync(batch.ID, batch.FilePath)
+				utils.SuccessResponse(c, gin.H{
+					"message":  "Fast-track: reused existing physical file.",
+					"batch_id": batch.ID,
+					"reused":   true,
+				})
+				return
+			}
+			log.Printf("[Upload Error] Fast-track failed for hash %s: %v", fileHash, err)
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file field found in form or missing metadata for fast-track"})
 		return
 	}
 
 	// Create Batch Record
 	username := c.GetString("username")
-	batch, err := h.Service.CreateBatch(originalName, username, fileHash, savedPath)
+	batch, err := h.Service.CreateBatch(originalName, username, fileHash, savedPath, cleaningRules)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create batch"})
 		return
@@ -292,60 +323,81 @@ func (h *CsvHandler) StreamBatchProgress(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
 
 	c.Stream(func(w io.Writer) bool {
 		batch, err := h.Service.GetBatch(id)
 		if err != nil {
-			return false // stop stream
-		}
-
-		// Check if client disconnected
-		select {
-		case <-c.Request.Context().Done():
+			c.SSEvent("message", gin.H{
+				"type":    "error",
+				"message": "Batch not found",
+			})
 			return false
-		default:
 		}
 
-		// Construct progress JSON
-		type Progress struct {
-			Status        string `json:"status"`
-			ProcessedRows int    `json:"processed_rows"`
-			TotalRows     int    `json:"total_rows"`
-			Filters       struct {
-				Success int `json:"success"`
-				Failed  int `json:"failed"`
-			} `json:"filters"`
-			Error string  `json:"error,omitempty"`
-			Speed float64 `json:"speed"` // 实时处理速度 (rows/sec)
+		// Calculate stats
+		elapsed := int(time.Since(batch.CreatedAt).Seconds())
+		percent := 0
+		if batch.TotalRows > 0 {
+			percent = int(float64(batch.ProcessedRows) / float64(batch.TotalRows) * 100)
+			if percent > 100 {
+				percent = 100
+			}
 		}
 
-		// Inject real-time speed from memory
-		var currentSpeed float64
-		// Parse Batch ID to uint
 		var bid uint
 		fmt.Sscanf(id, "%d", &bid)
-		if batch.Status == model.BatchStatusProcessing || batch.Status == model.BatchStatusIndexing {
-			currentSpeed = h.Service.GetBatchSpeed(bid)
+		currentSpeed := h.Service.GetBatchSpeed(bid)
+
+		eta := 0
+		if currentSpeed > 0 && batch.TotalRows > batch.ProcessedRows {
+			eta = int(float64(batch.TotalRows-batch.ProcessedRows) / currentSpeed)
 		}
 
-		data := Progress{
-			Status:        string(batch.Status),
-			ProcessedRows: batch.ProcessedRows,
-			TotalRows:     batch.TotalRows,
-			Speed:         currentSpeed,
+		// Standard Progress Message
+		c.SSEvent("message", gin.H{
+			"type":      "progress",
+			"status":    string(batch.Status),
+			"processed": batch.ProcessedRows,
+			"total":     batch.TotalRows,
+			"success":   batch.SuccessCount,
+			"failed":    batch.FailureCount,
+			"speed":     currentSpeed,
+			"percent":   percent,
+			"elapsed":   elapsed,
+			"eta":       eta,
+		})
+
+		// Termination Logic
+		if batch.Status == model.BatchStatusCompleted {
+			// Send final completed event with preview
+			records, _, _ := h.Service.GetRecords(id, "all", "", 1, 5)
+			c.SSEvent("message", gin.H{
+				"type":    "completed",
+				"total":   batch.TotalRows,
+				"success": batch.SuccessCount,
+				"failed":  batch.FailureCount,
+				"preview": records,
+			})
+			return false
 		}
-		data.Filters.Success = batch.SuccessCount
-		data.Filters.Failed = batch.FailureCount
-		data.Error = batch.Error
 
-		c.SSEvent("message", data)
-
-		if batch.Status == model.BatchStatusCompleted || batch.Status == model.BatchStatusFailed {
-			return false // stop
+		if batch.Status == model.BatchStatusFailed {
+			c.SSEvent("message", gin.H{
+				"type":    "error",
+				"message": batch.Error,
+			})
+			return false
 		}
 
-		time.Sleep(500 * time.Millisecond) // Poll DB every 500ms
+		if batch.Status == model.BatchStatusCancelled {
+			c.SSEvent("message", gin.H{
+				"type":   "progress",
+				"status": "Cancelled",
+			})
+			return false
+		}
+
+		time.Sleep(500 * time.Millisecond)
 		return true
 	})
 }
@@ -503,4 +555,17 @@ func (h *CsvHandler) CancelBatch(c *gin.Context) {
 		return
 	}
 	utils.SuccessResponse(c, gin.H{"message": "Batch cancelled successfully"})
+}
+
+// DeleteBatch 删除一个批次
+func (h *CsvHandler) DeleteBatch(c *gin.Context) {
+	idStr := c.Param("id")
+	var id uint
+	fmt.Sscanf(idStr, "%d", &id)
+
+	if err := h.Service.DeleteBatch(id); err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	utils.SuccessResponse(c, gin.H{"message": "Batch deleted successfully"})
 }

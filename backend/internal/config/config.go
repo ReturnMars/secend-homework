@@ -28,6 +28,7 @@ type Config struct {
 		JWTSecret string `yaml:"jwt_secret"`
 		UploadDir string `yaml:"upload_dir"`
 	} `yaml:"server"`
+	CleaningRules interface{} `yaml:"cleaning_rules"`
 }
 
 func (c *Config) GetDatabaseDSN() string {

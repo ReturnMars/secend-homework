@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"etl-tool/internal/config"
 	"etl-tool/internal/model"
 	"etl-tool/internal/repository"
 	"etl-tool/internal/utils"
@@ -30,6 +32,7 @@ type CleanerService struct {
 	DB          *gorm.DB
 	batchSpeeds sync.Map      // 存储实时处理速度 (key: batchID, value: float64)
 	processSem  chan struct{} // 限制并发处理任务数，防止内存爆炸
+	Engine      *RuleEngine   // 规则引擎
 }
 
 // NewCleanerService 创建一个新的 CleanerService 实例
@@ -43,9 +46,20 @@ func NewCleanerService() *CleanerService {
 		limit = 8
 	}
 
+	engine := NewRuleEngine()
+	if config.AppConfig != nil && config.AppConfig.CleaningRules != nil {
+		jsonData, err := json.Marshal(config.AppConfig.CleaningRules)
+		if err == nil {
+			engine.LoadConfig(jsonData)
+		} else {
+			log.Printf("[RuleEngine] Error marshaling cleaning rules: %v", err)
+		}
+	}
+
 	return &CleanerService{
 		DB:         repository.DB,
 		processSem: make(chan struct{}, limit),
+		Engine:     engine,
 	}
 }
 
@@ -99,7 +113,7 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 			return
 		}
 
-		err := s.processFileStream(ctx, batchID, filePath, batch.ProcessedRows)
+		err := s.processFileStream(ctx, batchID, filePath, batch.ProcessedRows, batch.Rules)
 		if err != nil {
 			// 如果是由于 Context 取消（暂停或取消），不需要标记为 Failed
 			if ctx.Err() != nil {
@@ -119,7 +133,7 @@ func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
 }
 
 // processFileStream 使用流式迭代器处理文件以节省内存
-func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, filePath string, skipRows int) error {
+func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, filePath string, skipRows int, rules string) error {
 	// 1. 估算总行数 (如果是重新开始)
 	var totalLines int
 	if skipRows == 0 {
@@ -159,9 +173,22 @@ func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, fi
 		return fmt.Errorf("could not detect required columns (Name/Phone). Header was: %v", header)
 	}
 
-	// 5. 极致性能：针对千万级数据，先卸载索引，写完后瞬间重建
+	// 5. 初始化该批次特有的规则引擎
+	engine := NewRuleEngine()
+	if rules != "" {
+		if err := engine.LoadConfig([]byte(rules)); err != nil {
+			log.Printf("[RuleEngine] Warning: Failed to load custom rules for batch %d: %v. Falling back to defaults.", batchID, err)
+			// 如果前端提供的规则格式错误，在此处记录并继续（或返回错误）
+		}
+	} else if config.AppConfig != nil && config.AppConfig.CleaningRules != nil {
+		// 回退到全局默认规则
+		jsonData, _ := json.Marshal(config.AppConfig.CleaningRules)
+		engine.LoadConfig(jsonData)
+	}
+
+	// 6. 极致性能：针对千万级数据，先卸载索引，写完后瞬间重建
 	repository.DropSearchIndexes()
-	stats, err := s.processRows(ctx, iter, batchID, indices, skipRows)
+	stats, err := s.processRows(ctx, iter, batchID, indices, skipRows, engine)
 
 	// 数据已全部入库，但在搜索生效前需要重建索引
 	if err == nil {
@@ -272,7 +299,7 @@ func getAdaptiveConfig() (numWorkers int, numSavers int, bufferSize int, batchSi
 }
 
 // processRows 采用高度并发的 Worker Pool 模式处理数据
-func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator, batchID uint, indices utils.ColIndices, skipRows int) (*processStats, error) {
+func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator, batchID uint, indices utils.ColIndices, skipRows int, engine *RuleEngine) (*processStats, error) {
 	// 自适应配置
 	numWorkers, numSavers, bufferSize, batchSize := getAdaptiveConfig()
 
@@ -302,7 +329,7 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 		go func() {
 			defer wg.Done()
 			for t := range taskChan {
-				rec := s.createRecordFromRow(t.row, batchID, t.idx, indices)
+				rec := s.createRecordFromRow(t.row, batchID, t.idx, indices, engine)
 				if rec.Status == "Clean" {
 					atomic.AddInt64(&successCount, 1)
 				} else {
@@ -477,10 +504,9 @@ Loop:
 }
 
 // createRecordFromRow 从原始行数据创建 Record
-func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx int, indices utils.ColIndices) model.Record {
+func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx int, indices utils.ColIndices, engine *RuleEngine) model.Record {
 	getCol := func(idx int) string {
 		if idx >= 0 && idx < len(row) {
-			// 由于生产者已经执行过 strings.Clone，此处不需要重复 Clone
 			return row[idx]
 		}
 		return ""
@@ -496,26 +522,42 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 		Address:  utils.Truncate(rawAddress, 255),
 	}
 
-	// 清洗姓名（应用 Emoji 过滤等规则）
-	cleanName, _ := CleanName(rawName)
+	var errors []string
+
+	// 动态清洗
+	cleanName, err := engine.Execute("name", rawName)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Name: %v", err))
+	}
 	rec.Name = utils.Truncate(cleanName, 255)
 
-	// 清洗手机号
-	cleanPhone, _ := CleanPhone(rawPhone)
+	cleanPhone, err := engine.Execute("phone", rawPhone)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Phone: %v", err))
+	}
 	rec.Phone = utils.Truncate(cleanPhone, 50)
 
-	// 清洗日期
-	cleanDate, _ := CleanDate(rawDate)
+	cleanDate, err := engine.Execute("date", rawDate)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Date: %v", err))
+	}
 	rec.Date = utils.Truncate(cleanDate, 50)
 
-	// 提取地址信息
-	p, c, d := ExtractAddress(rawAddress)
+	// 地址解析 (动态)
+	p, _ := engine.Execute("address_province", rawAddress)
+	c, _ := engine.Execute("address_city", rawAddress)
+	d, _ := engine.Execute("address_district", rawAddress)
 	rec.Province = utils.Truncate(p, 100)
 	rec.City = utils.Truncate(c, 100)
 	rec.District = utils.Truncate(d, 100)
 
-	// 统一验证
-	rec.Status, rec.ErrorMessage = ValidateRecord(rawName, rawPhone, rawDate)
+	// 状态判断
+	if len(errors) > 0 {
+		rec.Status = "Error"
+		rec.ErrorMessage = fmt.Sprintf("%v", errors)
+	} else {
+		rec.Status = "Clean"
+	}
 
 	return rec
 }

@@ -105,6 +105,7 @@ func SetupRouter(svc *service.CleanerService) *gin.Engine {
 			protected.POST("/batches/:id/pause", h.PauseBatch)
 			protected.POST("/batches/:id/resume", h.ResumeBatch)
 			protected.POST("/batches/:id/cancel", h.CancelBatch)
+			protected.DELETE("/batches/:id", h.DeleteBatch)
 
 			protected.PUT("/records/:id", h.UpdateRecord)
 			protected.POST("/records/:id/validate", h.ValidateRecord)

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"etl-tool/internal/config"
 	"etl-tool/internal/model"
 
 	"gorm.io/gorm"
@@ -93,6 +94,20 @@ func (s *CleanerService) ValidateRecordUpdate(id string, updates map[string]inte
 		return nil, err
 	}
 
+	// 获取对应批次的规则
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, record.BatchID).Error; err != nil {
+		return nil, fmt.Errorf("could not find batch for validation")
+	}
+
+	engine := NewRuleEngine()
+	if batch.Rules != "" {
+		engine.LoadConfig([]byte(batch.Rules))
+	} else if config.AppConfig != nil && config.AppConfig.CleaningRules != nil {
+		jsonData, _ := json.Marshal(config.AppConfig.CleaningRules)
+		engine.LoadConfig(jsonData)
+	}
+
 	// 准备合并后的数据进行验证
 	newPhone := record.Phone
 	if v, ok := updates["phone"].(string); ok {
@@ -107,13 +122,37 @@ func (s *CleanerService) ValidateRecordUpdate(id string, updates map[string]inte
 		newName = v
 	}
 
-	newStatus, newError := ValidateRecord(newName, newPhone, newDate)
+	var errors []string
+	cleanName, err := engine.Execute("name", newName)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Name: %v", err))
+	}
+	cleanPhone, err := engine.Execute("phone", newPhone)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Phone: %v", err))
+	}
+	cleanDate, err := engine.Execute("date", newDate)
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Date: %v", err))
+	}
+
+	newStatus := "Clean"
+	newError := ""
+	if len(errors) > 0 {
+		newStatus = "Error"
+		newError = fmt.Sprintf("%v", errors)
+	}
 
 	return map[string]interface{}{
 		"current_status": record.Status,
 		"new_status":     newStatus,
 		"new_error":      newError,
 		"has_changes":    s.hasChanges(&record, updates),
+		"cleaned_values": map[string]string{
+			"name":  cleanName,
+			"phone": cleanPhone,
+			"date":  cleanDate,
+		},
 	}, nil
 }
 
@@ -147,24 +186,48 @@ func (s *CleanerService) UpdateRecord(id string, updates map[string]interface{},
 		name = v
 	}
 
+	// 获取对应批次的规则
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, record.BatchID).Error; err != nil {
+		return nil, fmt.Errorf("could not find batch for rule validation")
+	}
+
+	engine := NewRuleEngine()
+	if batch.Rules != "" {
+		engine.LoadConfig([]byte(batch.Rules))
+	} else if config.AppConfig != nil && config.AppConfig.CleaningRules != nil {
+		jsonData, _ := json.Marshal(config.AppConfig.CleaningRules)
+		engine.LoadConfig(jsonData)
+	}
+
 	// 尝试清洗数据以持久化更好的格式
-	cleanedPhone, _ := CleanPhone(phone)
-	cleanedDate, _ := CleanDate(date)
-	cleanedName, _ := CleanName(name)
+	cleanedPhone, phoneErr := engine.Execute("phone", phone)
+	cleanedDate, dateErr := engine.Execute("date", date)
+	cleanedName, nameErr := engine.Execute("name", name)
 
 	// 计算新状态
-	newStatus, newError := ValidateRecord(name, phone, date)
+	var errors []string
+	if nameErr != nil {
+		errors = append(errors, fmt.Sprintf("Name: %v", nameErr))
+	}
+	if phoneErr != nil {
+		errors = append(errors, fmt.Sprintf("Phone: %v", phoneErr))
+	}
+	if dateErr != nil {
+		errors = append(errors, fmt.Sprintf("Date: %v", dateErr))
+	}
+
+	newStatus := "Clean"
+	newError := ""
+	if len(errors) > 0 {
+		newStatus = "Error"
+		newError = fmt.Sprintf("%v", errors)
+	}
 
 	// 如果清洗成功，使用清洗后的值更新 map 以便存入数据库
-	if cleanedPhone != "" {
-		updates["phone"] = cleanedPhone
-	}
-	if cleanedDate != "" {
-		updates["date"] = cleanedDate
-	}
-	if cleanedName != "" {
-		updates["name"] = cleanedName
-	}
+	updates["phone"] = cleanedPhone
+	updates["date"] = cleanedDate
+	updates["name"] = cleanedName
 	updates["status"] = newStatus
 	updates["error_message"] = newError
 
