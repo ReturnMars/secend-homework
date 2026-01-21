@@ -68,21 +68,21 @@ export function RecordTable({
             <TabsList className="gap-1 bg-transparent h-10">
               <TabsTrigger value="all" className="gap-2 px-4">
                 <FileText className="h-3.5 w-3.5" />
-                All Records
+                所有记录
               </TabsTrigger>
               <TabsTrigger
                 value="clean"
                 className="data-[state=active]:text-green-700 gap-2 px-4"
               >
                 <CheckCircle className="h-3.5 w-3.5" />
-                Valid
+                已通过
               </TabsTrigger>
               <TabsTrigger
                 value="error"
                 className="data-[state=active]:text-red-700 gap-2 px-4"
               >
                 <XCircle className="h-3.5 w-3.5" />
-                Invalid
+                未通过
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -117,12 +117,12 @@ export function RecordTable({
               <TableHeader className="bg-muted/40 font-medium">
                 <TableRow>
                   <TableHead className="w-[60px] text-center">#</TableHead>
-                  <TableHead className="w-[120px]">Name</TableHead>
-                  <TableHead className="w-[130px]">Phone</TableHead>
-                  <TableHead className="w-[110px]">Date</TableHead>
-                  <TableHead className="min-w-[200px]">Location</TableHead>
-                  <TableHead className="w-[140px]">Status</TableHead>
-                  <TableHead className="w-[90px] text-right">Actions</TableHead>
+                  <TableHead className="w-[120px]">姓名</TableHead>
+                  <TableHead className="w-[130px]">手机号</TableHead>
+                  <TableHead className="w-[110px]">日期</TableHead>
+                  <TableHead className="min-w-[200px]">所在地区</TableHead>
+                  <TableHead className="w-[140px]">状态</TableHead>
+                  <TableHead className="w-[90px] text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className="h-[54vh]">
@@ -131,9 +131,9 @@ export function RecordTable({
                     <TableCell colSpan={7} className="text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <div className="h-8 w-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
-                        <p className="text-sm font-medium text-muted-foreground/80">
-                          Fetching records...
-                        </p>
+                        <div className="text-sm font-medium text-foreground wrap-break-word">
+                          正在获取记录...
+                        </div>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -143,7 +143,7 @@ export function RecordTable({
                       colSpan={7}
                       className="h-full text-center text-muted-foreground"
                     >
-                      No records found for this filter.
+                      未找到符合该过滤条件的记录。
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -197,7 +197,8 @@ export function RecordTable({
                               variant="outline"
                               className="bg-green-50/50 text-green-700 border-green-200/60 shadow-none font-medium h-5 px-1.5 text-[10px]"
                             >
-                              <CheckCircle className="mr-1 h-2.5 w-2.5" /> Valid
+                              <CheckCircle className="mr-1 h-2.5 w-2.5" />{" "}
+                              已通过
                             </Badge>
                           ) : (
                             <Tooltip>
@@ -207,10 +208,10 @@ export function RecordTable({
                                   className="w-fit shadow-none font-medium h-5 px-1.5 text-[10px] cursor-help"
                                 >
                                   <XCircle className="mr-1 h-2.5 w-2.5" />{" "}
-                                  Invalid
+                                  未通过
                                 </Badge>
                               </TooltipTrigger>
-                              <TooltipContent className="max-w-[300px] whitespace-normal break-words  text-destructive-foreground/80 ">
+                              <TooltipContent className="max-w-[300px] whitespace-normal wrap-break-word text-destructive-foreground/80 ">
                                 <p className="leading-relaxed font-medium text-destructive">
                                   {record.error_message}
                                 </p>
@@ -224,7 +225,7 @@ export function RecordTable({
                             size="sm"
                             onClick={() => handleEditClick(record)}
                           >
-                            Edit
+                            编辑
                           </Button>
                         </TableCell>
                       </TableRow>

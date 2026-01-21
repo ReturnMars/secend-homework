@@ -35,3 +35,32 @@ server:
 frontend:
   api_base_url: "/api"
   external_port: 5173 # 开发环境 Vite 端口
+# ------------------------------------------------------------------------------
+# 4. 动态清理规则 (Week 3)
+# ------------------------------------------------------------------------------
+cleaning_rules:
+  - column: "phone"
+    rules:
+      - type: "replace"
+        old: " "
+        new: ""
+      - type: "regex"
+        pattern: "^1\\d{10}$"
+  - column: "name"
+    rules:
+      - type: "required"
+  - column: "date"
+    rules:
+      - type: "date"
+  - column: "address_province"
+    rules:
+      - type: "address"
+        comp: "province"
+  - column: "address_city"
+    rules:
+      - type: "address"
+        comp: "city"
+  - column: "address_district"
+    rules:
+      - type: "address"
+        comp: "district"

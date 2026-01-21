@@ -63,7 +63,7 @@ export function BatchHeader({
   const onSave = async () => {
     const finalName = tempBatchName.trim() + extension;
     if (!tempBatchName.trim()) {
-      toast.error("Filename cannot be empty");
+      toast.error("文件名不能为空");
       setIsEditingBatchName(false);
       return;
     }
@@ -127,8 +127,18 @@ export function BatchHeader({
             )}
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Badge variant="outline">{batch.status}</Badge>
-            <span>Processed {new Date(batch.created_at).toLocaleString()}</span>
+            <Badge variant="outline">
+              {batch.status === "Processing"
+                ? "运行中"
+                : batch.status === "Completed"
+                  ? "已完成"
+                  : batch.status === "Failed"
+                    ? "已失败"
+                    : batch.status === "Paused"
+                      ? "已暂停"
+                      : "等待中"}
+            </Badge>
+            <span>创建于 {new Date(batch.created_at).toLocaleString()}</span>
           </div>
         </div>
       </div>
@@ -148,7 +158,7 @@ export function BatchHeader({
             ) : (
               <Pause className="h-4 w-4" />
             )}
-            Pause
+            暂停
           </Button>
         )}
 
@@ -165,7 +175,7 @@ export function BatchHeader({
             ) : (
               <Play className="h-4 w-4" />
             )}
-            Resume
+            恢复
           </Button>
         )}
 
@@ -184,7 +194,7 @@ export function BatchHeader({
             ) : (
               <Square className="h-4 w-4 fill-current" />
             )}
-            Cancel
+            停止
           </Button>
         )}
 
@@ -195,7 +205,7 @@ export function BatchHeader({
             onClick={() => handleDownload()}
             className="h-9 px-4"
           >
-            <Download className="mr-2 h-4 w-4" /> Export All
+            <Download className="mr-2 h-4 w-4" /> 导出全部
           </Button>
 
           <DropdownMenu modal={false}>
@@ -216,9 +226,9 @@ export function BatchHeader({
               >
                 <CheckCircle className="mr-2 h-4 w-4 text-green-500" />
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">Clean Data Only</span>
+                  <span className="font-medium">仅导出清洗后数据</span>
                   <span className="text-[10px] text-muted-foreground leading-none">
-                    Validated records only
+                    仅下载校验成功的记录
                   </span>
                 </div>
               </DropdownMenuItem>
@@ -228,9 +238,9 @@ export function BatchHeader({
               >
                 <AlertCircle className="mr-2 h-4 w-4 text-red-500" />
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">Error Report</span>
+                  <span className="font-medium">下载错误报告</span>
                   <span className="text-[10px] text-muted-foreground leading-none">
-                    Records with issues
+                    仅下载校验失败的记录
                   </span>
                 </div>
               </DropdownMenuItem>

@@ -19,8 +19,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 
 const formSchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(1, "Password is required"),
+  username: z.string().min(1, "请输入用户名"),
+  password: z.string().min(1, "请输入密码"),
 });
 
 export default function Login() {
@@ -63,7 +63,7 @@ export default function Login() {
             navigate(from, { replace: true });
           } catch (loginErr) {
             setError(
-              "Registration successful, but auto-login failed. Please sign in."
+              "Registration successful, but auto-login failed. Please sign in.",
             );
             setIsRegistering(false);
             setSuccess(null);
@@ -107,13 +107,13 @@ export default function Login() {
             <Command className="h-6 w-6 text-white" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
-            Welcome back
+            欢迎回来
           </h1>
           <p className="text-sm text-zinc-500 max-w-[300px]">
-            Sign in to DataPurifier
+            登录 DataPurifier
             <br />
             <span className="text-xs text-zinc-400 mt-1 block">
-              Intelligent data cleansing & validation platform
+              智能数据清洗与验证平台
             </span>
           </p>
         </div>
@@ -131,7 +131,7 @@ export default function Login() {
                   render={({ field }) => (
                     <FormItem className="space-y-1">
                       <FormLabel className="text-xs font-semibold text-zinc-600 uppercase tracking-wider ml-1">
-                        Username
+                        用户名
                       </FormLabel>
                       <FormControl>
                         <Input
@@ -151,18 +151,18 @@ export default function Login() {
                     <FormItem className="space-y-1">
                       <div className="flex items-center justify-between ml-1">
                         <FormLabel className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
-                          Password
+                          密码
                         </FormLabel>
                         {!isRegistering && (
                           <span className="text-[10px] font-medium text-zinc-400 hover:text-black cursor-pointer transition-colors">
-                            FORGOT?
+                            忘记密码？
                           </span>
                         )}
                       </div>
                       <FormControl>
                         <Input
                           type="password"
-                          placeholder="••••••••"
+                          placeholder="请输入密码"
                           {...field}
                           className="bg-zinc-50/50 border-zinc-200 focus-visible:ring-black focus-visible:border-black h-10 font-mono tracking-widest transition-all"
                         />
@@ -191,13 +191,11 @@ export default function Login() {
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {isRegistering
-                        ? "Creating account..."
-                        : "Authenticating..."}
+                      {isRegistering ? "正在创建账户..." : "身份验证中..."}
                     </>
                   ) : (
                     <>
-                      {isRegistering ? "Create Account" : "Sign In"}{" "}
+                      {isRegistering ? "立即注册" : "登录"}{" "}
                       <ArrowRight className="ml-2 h-4 w-4 opacity-70" />
                     </>
                   )}
@@ -210,9 +208,7 @@ export default function Login() {
         {/* Toggle between Login and Register */}
         <div className="mt-8 text-center">
           <p className="text-xs text-zinc-500">
-            {isRegistering
-              ? "Already have an account? "
-              : "Don't have an account? "}
+            {isRegistering ? "已有账户？" : "还没有账户？"}
             <span
               onClick={() => {
                 setIsRegistering(!isRegistering);
@@ -222,12 +218,12 @@ export default function Login() {
               }}
               className="text-zinc-900 font-semibold cursor-pointer hover:underline underline-offset-4"
             >
-              {isRegistering ? "Sign in" : "Get started"}
+              {isRegistering ? "立即登录" : "开始使用"}
             </span>
           </p>
 
           <p className="text-[10px] text-zinc-400 font-medium mt-4">
-            © 2026 Data Governance Team
+            © 2026 数据治理团队
           </p>
         </div>
       </div>

@@ -42,13 +42,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
                       className="transition-colors hover:text-foreground/80 text-foreground/60"
                       to="/"
                     >
-                      Dashboard
+                      控制面板
                     </Link>
                     <Link
                       className="transition-colors hover:text-foreground/80 text-foreground/60"
                       to="/history"
                     >
-                      History
+                      历史记录
                     </Link>
                   </nav>
                 </div>
@@ -71,13 +71,13 @@ export default function MainLayout({ children }: MainLayoutProps) {
                           onClick={logout}
                           className="text-muted-foreground hover:text-foreground"
                         >
-                          Sign out
+                          退出登录
                         </Button>
                       </div>
                     ) : (
                       <Link to="/login">
                         <Button size="sm" className="ml-2 hidden md:flex">
-                          Sign In
+                          登录
                         </Button>
                       </Link>
                     )}
@@ -97,32 +97,32 @@ export default function MainLayout({ children }: MainLayoutProps) {
                   <span className="font-semibold text-foreground">
                     DataPurifier
                   </span>
-                  <span>© 2026 Data Governance Team. All rights reserved.</span>
+                  <span>© 2026 数据治理团队. 保留所有权利.</span>
                 </div>
                 <div className="flex items-center gap-6">
                   <a
                     href="#"
                     className="hover:text-foreground transition-colors"
                   >
-                    Documentation
+                    帮助文档
                   </a>
                   <a
                     href="#"
                     className="hover:text-foreground transition-colors"
                   >
-                    API Status
+                    服务状态
                   </a>
                   <a
                     href="#"
                     className="hover:text-foreground transition-colors"
                   >
-                    Terms
+                    服务条款
                   </a>
                   <a
                     href="#"
                     className="hover:text-foreground transition-colors"
                   >
-                    Privacy
+                    隐私政策
                   </a>
                 </div>
               </div>

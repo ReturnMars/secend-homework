@@ -1,6 +1,6 @@
-
 // Base API URL
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string) || "/api";
+export const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string) || "/api";
 
 type RequestOptions = RequestInit & {
   // Allow passing parameters that are not part of RequestInit if needed in future
@@ -15,7 +15,7 @@ type RequestOptions = RequestInit & {
  */
 export async function apiRequest<T = any>(
   endpoint: string,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
 ): Promise<T> {
   const token = localStorage.getItem("auth_token");
 
@@ -81,7 +81,7 @@ export async function apiRequest<T = any>(
       const result = await response.json();
 
       // Unwrap standard response format {code, message, data, error}
-      if (result && typeof result === 'object' && 'code' in result) {
+      if (result && typeof result === "object" && "code" in result) {
         if (result.code === 200) {
           // Success: return user data
           return result.data as T;
@@ -97,7 +97,6 @@ export async function apiRequest<T = any>(
       // Rethrow logic error from above
       throw err;
     }
-
   } catch (error: any) {
     // We can log or toast here
     console.error("API Request Failed:", error);
@@ -108,34 +107,48 @@ export async function apiRequest<T = any>(
 
 // Convenience methods
 export const api = {
-  get: <T>(url: string, options?: RequestOptions) => apiRequest<T>(url, { ...options, method: 'GET' }),
-  post: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, {
-    ...options,
-    method: 'POST',
-    body: body instanceof FormData ? body : JSON.stringify(body)
-  }),
-  put: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, {
-    ...options,
-    method: 'PUT',
-    body: JSON.stringify(body)
-  }),
-  patch: <T>(url: string, body?: any, options?: RequestOptions) => apiRequest<T>(url, {
-    ...options,
-    method: 'PATCH',
-    body: JSON.stringify(body)
-  }),
-  delete: <T>(url: string, options?: RequestOptions) => apiRequest<T>(url, { ...options, method: 'DELETE' }),
+  get: <T>(url: string, options?: RequestOptions) =>
+    apiRequest<T>(url, { ...options, method: "GET" }),
+  post: <T>(url: string, body?: any, options?: RequestOptions) =>
+    apiRequest<T>(url, {
+      ...options,
+      method: "POST",
+      body: body instanceof FormData ? body : JSON.stringify(body),
+    }),
+  put: <T>(url: string, body?: any, options?: RequestOptions) =>
+    apiRequest<T>(url, {
+      ...options,
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  patch: <T>(url: string, body?: any, options?: RequestOptions) =>
+    apiRequest<T>(url, {
+      ...options,
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  delete: <T>(url: string, options?: RequestOptions) =>
+    apiRequest<T>(url, { ...options, method: "DELETE" }),
 
   /**
    * Check if a file already exists by its hash (Instant Upload)
    */
-  checkHash: (hash: string) => api.post<{ exists: boolean; batch_id?: number; status?: string }>("/upload/check", { hash }),
+  checkHash: (hash: string) =>
+    api.post<{ exists: boolean; batch_id?: number; status?: string }>(
+      "/upload/check",
+      { hash },
+    ),
 
   /**
    * Special method for file uploads with progress tracking
    * Uses XMLHttpRequest because Fetch API doesn't support upload progress
    */
-  upload: <T>(url: string, file: File, onProgress: (percent: number) => void, metadata?: { hash: string }): Promise<T> => {
+  upload: <T>(
+    url: string,
+    file: File,
+    onProgress: (percent: number) => void,
+    metadata?: { hash: string; rules?: string },
+  ): Promise<T> => {
     console.log(`[API] Starting upload to: ${url}`, file.name);
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -163,11 +176,13 @@ export const api = {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const result = JSON.parse(xhr.responseText);
-            if (result && typeof result === 'object' && 'code' in result) {
+            if (result && typeof result === "object" && "code" in result) {
               if (result.code === 200) {
                 resolve(result.data as T);
               } else {
-                reject(new Error(result.error || result.message || "Upload failed"));
+                reject(
+                  new Error(result.error || result.message || "Upload failed"),
+                );
               }
             } else {
               resolve(result as T);
@@ -191,6 +206,9 @@ export const api = {
       if (metadata?.hash) {
         formData.append("hash", metadata.hash);
       }
+      if (metadata?.rules) {
+        formData.append("rules", metadata.rules);
+      }
       formData.append("file", file);
       xhr.send(formData);
     });
@@ -203,7 +221,9 @@ export const api = {
 
     try {
       // 1. Get short-lived token
-      const { token } = await api.get<{ token: string }>("/auth/download-token");
+      const { token } = await api.get<{ token: string }>(
+        "/auth/download-token",
+      );
 
       // 2. Construct URL with token
       const baseUrl = endpoint.startsWith("http")
@@ -217,9 +237,9 @@ export const api = {
       // Creating an hidden iframe or link is cleaner than window.location for UX (doesn't replace history)
       // But for file downloads, window.location is usually fine as it doesn't navigate away if it's an attachment.
       // Let's use a temp link click to be safe.
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = downloadUrl;
-      a.style.display = 'none';
+      a.style.display = "none";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -234,10 +254,13 @@ export const api = {
   // 5. 获取进度 SSE 连接
   getProgressSource(batchId: string): EventSource {
     const token = localStorage.getItem("auth_token");
-    return new EventSource(`${API_BASE_URL}/batches/${batchId}/progress?token=${token}`);
+    return new EventSource(
+      `${API_BASE_URL}/batches/${batchId}/progress?token=${token}`,
+    );
   },
 
   pauseBatch: (id: string | number) => api.post(`/batches/${id}/pause`),
   resumeBatch: (id: string | number) => api.post(`/batches/${id}/resume`),
   cancelBatch: (id: string | number) => api.post(`/batches/${id}/cancel`),
+  deleteBatch: (id: string | number) => api.delete(`/batches/${id}`),
 };

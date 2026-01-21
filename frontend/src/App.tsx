@@ -15,6 +15,7 @@ import MainLayout from "./layout/MainLayout";
 import Dashboard from "./pages/Dashboard";
 import BatchDetail from "./pages/BatchDetail";
 import History from "./pages/History";
+import ImportPage from "./pages/ImportPage";
 import Login from "./pages/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
 
@@ -49,6 +50,21 @@ function AnimatedRoutes() {
               className="flex-1 flex flex-col"
             >
               <Dashboard />
+            </motion.div>
+          }
+        />
+        <Route
+          path="/import"
+          element={
+            <motion.div
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              variants={pageVariants}
+              transition={pageTransition}
+              className="flex-1 flex flex-col"
+            >
+              <ImportPage />
             </motion.div>
           }
         />

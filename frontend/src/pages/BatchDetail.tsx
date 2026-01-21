@@ -19,17 +19,17 @@ import { useRecordEditor } from "../components/batch-detail/hooks/useRecordEdito
 const formSchema = z.object({
   name: z
     .string()
-    .min(1, "Name is required")
+    .min(1, "请输入姓名")
     .transform((v) => v.trim()),
   phone: z
     .string()
-    .min(1, "Phone is required")
+    .min(1, "请输入手机号")
     .transform((v) => v.trim()),
   date: z.string().optional(),
   province: z.string().optional(),
   city: z.string().optional(),
   district: z.string().optional(),
-  reason: z.string().min(2, "Reason must be at least 2 characters"),
+  reason: z.string().min(2, "修改原因至少需要2个字符"),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -101,7 +101,7 @@ export default function BatchDetail() {
   if (batchLoading)
     return (
       <div className="p-10 text-center text-muted-foreground animate-pulse">
-        Loading batch data...
+        正在加载批次数据...
       </div>
     );
 
@@ -110,13 +110,13 @@ export default function BatchDetail() {
       <div className="container max-w-screen-2xl mx-auto py-8 px-4 sm:px-8">
         <div className="flex flex-col items-center justify-center p-10 space-y-4 border rounded-lg bg-background/50">
           <div className="text-xl font-semibold text-destructive">
-            Batch Not Found
+            未找到该批次
           </div>
           <p className="text-muted-foreground">
-            The requested batch could not be found or has been deleted.
+            所请求的批次无法找到或已被删除。
           </p>
           <Button asChild variant="outline" className="mt-4">
-            <Link to="/">Back to Dashboard</Link>
+            <Link to="/">返回控制面板</Link>
           </Button>
         </div>
       </div>

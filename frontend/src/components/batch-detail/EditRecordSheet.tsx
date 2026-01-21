@@ -106,7 +106,7 @@ export function EditRecordSheet({
       };
       const changes = Object.entries(fieldMap).filter(
         ([_, backendKey]) =>
-          String(b[backendKey] || "") !== String(a[backendKey] || "")
+          String(b[backendKey] || "") !== String(a[backendKey] || ""),
       );
 
       if (changes.length === 0) return null;
@@ -157,7 +157,7 @@ export function EditRecordSheet({
           onPointerDownOutside={(e) => e.preventDefault()}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Edit Record</SheetTitle>
+            <SheetTitle>编辑记录</SheetTitle>
           </SheetHeader>
 
           {/* Fixed Interactive Handle Style (Purely Visual) */}
@@ -211,11 +211,10 @@ export function EditRecordSheet({
             <div className="mx-auto w-full max-w-7xl">
               <SheetHeader className="px-0 pb-6 relative text-center">
                 <SheetTitle className="text-3xl font-bold tracking-tight">
-                  Edit Record #{editingRecord?.row_index}
+                  编辑记录 #{editingRecord?.row_index}
                 </SheetTitle>
                 <SheetDescription className="text-sm">
-                  Manual correction for detected data issues. All changes are
-                  logged in version history.
+                  手动纠正检测到的数据问题。所有更改都将记录在版本历史中。
                 </SheetDescription>
               </SheetHeader>
 
@@ -235,7 +234,7 @@ export function EditRecordSheet({
                               <FormItem className="space-y-2">
                                 <div className="flex items-center justify-between h-4">
                                   <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Full Name
+                                    姓名
                                   </FormLabel>
                                   <AnimatePresence>
                                     {form.formState.errors.name && (
@@ -263,7 +262,7 @@ export function EditRecordSheet({
                               <FormItem className="space-y-2 flex flex-col">
                                 <div className="flex items-center justify-between h-4">
                                   <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Date
+                                    日期
                                   </FormLabel>
                                   <AnimatePresence>
                                     {form.formState.errors.date && (
@@ -285,7 +284,7 @@ export function EditRecordSheet({
                                         className={cn(
                                           "h-10 pl-3 text-left font-normal border-input hover:bg-background hover:text-foreground",
                                           !field.value &&
-                                            "text-muted-foreground"
+                                            "text-muted-foreground",
                                         )}
                                       >
                                         {field.value ? (
@@ -319,7 +318,9 @@ export function EditRecordSheet({
                                       }
                                       onSelect={(date) => {
                                         field.onChange(
-                                          date ? format(date, "yyyy-MM-dd") : ""
+                                          date
+                                            ? format(date, "yyyy-MM-dd")
+                                            : "",
                                         );
                                       }}
                                       disabled={(date) =>
@@ -341,7 +342,7 @@ export function EditRecordSheet({
                             <FormItem className="space-y-2">
                               <div className="flex items-center justify-between h-4">
                                 <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Phone Number
+                                  联系电话
                                 </FormLabel>
                                 <AnimatePresence>
                                   {form.formState.errors.phone && (
@@ -370,7 +371,7 @@ export function EditRecordSheet({
                               <FormItem className="space-y-2">
                                 <div className="flex items-center justify-between h-4">
                                   <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Province
+                                    省份
                                   </FormLabel>
                                   <AnimatePresence>
                                     {form.formState.errors.province && (
@@ -397,7 +398,7 @@ export function EditRecordSheet({
                               <FormItem className="space-y-2">
                                 <div className="flex items-center justify-between h-4">
                                   <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                    City
+                                    城市
                                   </FormLabel>
                                   <AnimatePresence>
                                     {form.formState.errors.city && (
@@ -424,7 +425,7 @@ export function EditRecordSheet({
                               <FormItem className="space-y-2">
                                 <div className="flex items-center justify-between h-4">
                                   <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                    District
+                                    区县/街道
                                   </FormLabel>
                                   <AnimatePresence>
                                     {form.formState.errors.district && (
@@ -453,7 +454,7 @@ export function EditRecordSheet({
                             <FormItem className="space-y-2">
                               <div className="flex items-center justify-between h-4">
                                 <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                  Correction Reason
+                                  修改原因
                                 </FormLabel>
                                 <AnimatePresence>
                                   {form.formState.errors.reason && (
@@ -470,7 +471,7 @@ export function EditRecordSheet({
                               <FormControl>
                                 <Input
                                   {...field}
-                                  placeholder="e.g. Corrected name spelling or phone digit"
+                                  placeholder="例如：纠正姓名拼写或联系电话"
                                   className="h-10"
                                 />
                               </FormControl>
@@ -490,7 +491,7 @@ export function EditRecordSheet({
                                 setValidationResult(null);
                               }}
                             >
-                              Cancel
+                              取消
                             </Button>
                           </SheetClose>
                           {!validationResult && (
@@ -499,7 +500,7 @@ export function EditRecordSheet({
                               disabled={isSubmitting}
                               className="min-w-[120px]"
                             >
-                              {isSubmitting ? "Checking..." : "Save Changes"}
+                              {isSubmitting ? "正在校验..." : "提交更改"}
                             </Button>
                           )}
                         </div>
@@ -511,7 +512,7 @@ export function EditRecordSheet({
                     <div className="lg:absolute lg:inset-0 flex flex-col border rounded-xl bg-muted/20 overflow-hidden shadow-sm">
                       <div className="p-4 border-b bg-background/50">
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                          <HistoryIcon className="h-4 w-4" /> Version History
+                          <HistoryIcon className="h-4 w-4" /> 版本历史
                         </h3>
                       </div>
                       <div className="flex-1 overflow-y-auto p-4 space-y-0">
@@ -521,7 +522,7 @@ export function EditRecordSheet({
                               <HistoryIcon className="h-5 w-5 text-muted-foreground/50" />
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              No previous modifications tracked for this record.
+                              该记录暂无修改历史记录。
                             </p>
                           </div>
                         ) : (
@@ -541,14 +542,14 @@ export function EditRecordSheet({
                                       const d = new Date(ver.changed_at);
                                       return !isNaN(d.getTime())
                                         ? d.toLocaleString()
-                                        : "Unknown Date";
+                                        : "未知日期";
                                     })()}
                                   </span>
                                   <Badge
                                     variant="outline"
                                     className="text-[9px] h-4 px-1 bg-background opacity-70"
                                   >
-                                    rev {history.length - idx}
+                                    修订版本 {history.length - idx}
                                   </Badge>
                                 </div>
                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -604,7 +605,7 @@ export function EditRecordSheet({
                                 </div>
                               ) : (
                                 <p className="text-[11px] text-muted-foreground leading-snug mb-2 font-normal">
-                                  {ver.reason || "No reason provided"}
+                                  {ver.reason || "未提供修改原因"}
                                 </p>
                               )}
                               {renderDiff(ver.before, ver.after)}
@@ -633,7 +634,7 @@ export function EditRecordSheet({
                   "p-2 rounded-full",
                   validationResult?.new_status === "Clean"
                     ? "bg-green-100 dark:bg-green-950/50"
-                    : "bg-red-100 dark:bg-red-950/50"
+                    : "bg-red-100 dark:bg-red-950/50",
                 )}
               >
                 {validationResult?.new_status === "Clean" ? (
@@ -664,7 +665,7 @@ export function EditRecordSheet({
                     "text-sm font-mono font-extrabold",
                     validationResult?.current_status === "Clean"
                       ? "text-green-600 dark:text-green-500"
-                      : "text-red-600 dark:text-red-500"
+                      : "text-red-600 dark:text-red-500",
                   )}
                 >
                   {validationResult?.current_status}
@@ -684,7 +685,7 @@ export function EditRecordSheet({
                   className={cn(
                     "font-mono h-6 transition-all",
                     validationResult?.new_status === "Clean" &&
-                      "bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20"
+                      "bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20",
                   )}
                 >
                   {validationResult?.new_status === "Clean" ? "Clean" : "Error"}
@@ -715,10 +716,10 @@ export function EditRecordSheet({
                 "h-10 px-6 rounded-xl text-sm font-bold shadow-lg shadow-primary/20 transition-all active:scale-95",
                 validationResult?.new_status === "Clean"
                   ? "bg-zinc-900 text-zinc-50 dark:bg-zinc-50 dark:text-zinc-950 hover:opacity-90"
-                  : "bg-red-600 hover:bg-red-700 text-white"
+                  : "bg-red-600 hover:bg-red-700 text-white",
               )}
               onClick={form.handleSubmit((values) =>
-                handleSaveEdit(values, true)
+                handleSaveEdit(values, true),
               )}
             >
               确认并提交

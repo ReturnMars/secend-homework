@@ -4,17 +4,6 @@ import { api } from "../lib/api";
 import { FileSpreadsheet, Plus, Activity, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
-import UploadZone from "../components/UploadZone";
 import { BatchRow } from "../components/BatchRow";
 
 interface Batch {
@@ -28,7 +17,6 @@ interface Batch {
 
 export default function Dashboard() {
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
   const navigate = useNavigate();
 
   const fetchBatches = async () => {
@@ -44,50 +32,22 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchBatches();
-    // 轮询列表中批次的基本状态，主要为了发现新上传的记录
     const timer = setInterval(fetchBatches, 10000);
     return () => clearInterval(timer);
   }, []);
-
-  const handleUploadSuccess = () => {
-    setIsUploadOpen(false);
-    fetchBatches();
-  };
 
   return (
     <div className="container max-w-screen-2xl mx-auto py-10 px-4 sm:px-8 space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-3xl font-bold tracking-tight">控制面板</h1>
           <p className="text-muted-foreground mt-1">
-            Manage and track your data cleaning pipelines.
+            管理并追踪您的数据清洗流水线。
           </p>
         </div>
-        <Drawer open={isUploadOpen} onOpenChange={setIsUploadOpen}>
-          <DrawerTrigger asChild>
-            <Button className="shadow-lg hover:shadow-xl transition-all">
-              <Plus className="mr-2 h-4 w-4" /> New Import
-            </Button>
-          </DrawerTrigger>
-          <DrawerContent>
-            <div className="mx-auto w-full max-w-lg">
-              <DrawerHeader>
-                <DrawerTitle>Upload New Dataset</DrawerTitle>
-                <DrawerDescription>
-                  Drag and drop your Excel/CSV file here to start cleaning.
-                </DrawerDescription>
-              </DrawerHeader>
-              <div className="p-4 pb-0">
-                <UploadZone onSuccess={handleUploadSuccess} />
-              </div>
-              <DrawerFooter>
-                <DrawerClose asChild>
-                  <Button variant="outline">Cancel</Button>
-                </DrawerClose>
-              </DrawerFooter>
-            </div>
-          </DrawerContent>
-        </Drawer>
+        <Button onClick={() => navigate("/import")}>
+          <Plus className="mr-1" /> 新建导入
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -96,7 +56,7 @@ export default function Dashboard() {
           <div className="absolute -top-12 -right-12 h-48 w-48 bg-blue-500/5 rounded-full blur-3xl transition-all duration-500 group-hover:bg-blue-500/10 pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 relative z-10">
             <CardTitle className="text-sm font-medium text-muted-foreground tracking-tight">
-              Total Records
+              总数据量
             </CardTitle>
             <FileSpreadsheet className="h-5 w-5 text-blue-600" />
           </CardHeader>
@@ -110,7 +70,7 @@ export default function Dashboard() {
               <span className="flex items-center text-blue-600 bg-blue-500/10 px-2 py-0.5 rounded-full mr-2 font-medium">
                 <Activity className="h-3 w-3 mr-1" /> +12.5%
               </span>
-              <span className="opacity-80">from last month</span>
+              <span className="opacity-80">较上月</span>
             </div>
           </CardContent>
         </Card>
@@ -120,7 +80,7 @@ export default function Dashboard() {
           <div className="absolute -top-12 -right-12 h-48 w-48 bg-green-500/5 rounded-full blur-3xl transition-all duration-500 group-hover:bg-green-500/10 pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 relative z-10">
             <CardTitle className="text-sm font-medium text-muted-foreground tracking-tight">
-              Success Rate
+              平均成功率
             </CardTitle>
             <Activity className="h-5 w-5 text-green-600" />
           </CardHeader>
@@ -129,7 +89,7 @@ export default function Dashboard() {
               const total = batches.reduce((acc, b) => acc + b.total_rows, 0);
               const success = batches.reduce(
                 (acc, b) => acc + b.success_count,
-                0
+                0,
               );
               const percent = total > 0 ? (success / total) * 100 : 0;
 
@@ -159,7 +119,7 @@ export default function Dashboard() {
           <div className="absolute -top-12 -right-12 h-48 w-48 bg-purple-500/5 rounded-full blur-3xl transition-all duration-500 group-hover:bg-purple-500/10 pointer-events-none" />
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 relative z-10">
             <CardTitle className="text-sm font-medium text-muted-foreground tracking-tight">
-              Latest Import
+              最近导入
             </CardTitle>
             <Clock className="h-5 w-5 text-purple-600" />
           </CardHeader>
@@ -168,7 +128,7 @@ export default function Dashboard() {
               {batches.length > 0
                 ? new Date(batches[0].created_at).toLocaleDateString(
                     undefined,
-                    { month: "short", day: "numeric" }
+                    { month: "short", day: "numeric" },
                   )
                 : "-"}
             </div>
@@ -179,7 +139,7 @@ export default function Dashboard() {
                       hour: "2-digit",
                       minute: "2-digit",
                     })
-                  : "No imports yet"}
+                  : "暂无导入记录"}
               </span>
             </div>
           </CardContent>
@@ -189,16 +149,14 @@ export default function Dashboard() {
       {/* Recent Activity Table */}
       <div className="space-y-4">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Recent Activity
-          </h2>
+          <h2 className="text-lg font-semibold tracking-tight">最近动态</h2>
           <Button
             variant="ghost"
             size="sm"
             className="text-muted-foreground hover:text-foreground h-8 text-xs"
             onClick={() => navigate("/history")}
           >
-            View All
+            查看全部
           </Button>
         </div>
 
@@ -206,14 +164,10 @@ export default function Dashboard() {
           <table className="w-full text-sm text-left">
             <thead className="bg-muted/30 text-muted-foreground font-medium border-b border-border/50">
               <tr>
-                <th className="py-3 px-4 w-[40%] pl-6 font-medium">
-                  Batch Identifier
-                </th>
-                <th className="py-3 px-4 font-medium">
-                  Progress & Performance
-                </th>
-                <th className="py-3 px-4 font-medium">Status & Control</th>
-                <th className="py-3 px-4 text-right font-medium">Date</th>
+                <th className="py-3 px-4 w-[40%] pl-6 font-medium">批次标识</th>
+                <th className="py-3 px-4 font-medium">清洗进度与性能</th>
+                <th className="py-3 px-4 font-medium">状态与控制</th>
+                <th className="py-3 px-4 text-right font-medium">日期</th>
                 <th className="py-3 px-4 w-10"></th>
               </tr>
             </thead>
@@ -227,11 +181,28 @@ export default function Dashboard() {
               ))}
               {batches.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="py-8 text-center text-muted-foreground"
-                  >
-                    No imports found. Start a new import above.
+                  <td colSpan={5} className="py-16 text-center">
+                    <div className="flex flex-col items-center justify-center space-y-4">
+                      <div className="bg-muted/30 p-4 rounded-2xl">
+                        <FileSpreadsheet className="h-10 w-10 text-muted-foreground/20" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-muted-foreground font-medium">
+                          暂无导入记录
+                        </p>
+                        <p className="text-xs text-muted-foreground/60">
+                          点击下方按钮开始您的第一个数据清洗任务
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        onClick={() => navigate("/import")}
+                        className="mt-2 rounded-xl px-8 border-dashed border-2 hover:border-primary hover:bg-primary/5 hover:text-primary transition-all group"
+                      >
+                        <Plus className="mr-2 h-4 w-4 group-hover:scale-110 transition-transform" />
+                        立即开始导入
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               )}

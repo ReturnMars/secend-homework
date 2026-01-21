@@ -7,12 +7,25 @@ import {
   Play,
   Square,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { api } from "../lib/api";
 import { useBatchActions } from "../hooks/useBatchActions";
 import clsx from "clsx";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface Batch {
   id: number;
@@ -39,6 +52,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
   const [successCount, setSuccessCount] = useState(initialBatch.success_count);
   const [totalRows, setTotalRows] = useState(initialBatch.total_rows);
   const [errorMessage, setErrorMessage] = useState(initialBatch.error || "");
+  const [isDeleting, setIsDeleting] = useState(false);
   const [metrics, setMetrics] = useState({
     speed: 0,
     eta: 0,
@@ -114,12 +128,22 @@ export const BatchRow: React.FC<BatchRowProps> = ({
     navigate(`/batches/${initialBatch.id}`);
   };
 
+  const handleDelete = async () => {
+    try {
+      setIsDeleting(true);
+      await api.deleteBatch(initialBatch.id);
+      toast.success("批次删除成功");
+      if (onStatusChange) onStatusChange();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete batch");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
-    <tr
-      className="group hover:bg-muted/40 transition-colors cursor-pointer"
-      onClick={onRowClick}
-    >
-      <td className="py-3 px-4 pl-6">
+    <tr className="group hover:bg-muted/40 transition-colors cursor-pointer">
+      <td className="py-3 px-4 pl-6" onClick={onRowClick}>
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 shrink-0 group-hover:scale-105 transition-transform">
             <FileSpreadsheet className="h-4 w-4" />
@@ -134,7 +158,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
           </div>
         </div>
       </td>
-      <td className="py-3 px-4">
+      <td className="py-3 px-4" onClick={onRowClick}>
         <div className="flex flex-col gap-1.5 max-w-[180px]">
           <div className="flex justify-between text-[10px] text-muted-foreground h-4">
             <span>
@@ -149,7 +173,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
             )}
             {status === "Indexing" && (
               <span className="font-sans text-amber-600 animate-pulse text-[9px] uppercase tracking-wider font-bold">
-                Optimizing Index...
+                优化索引中...
               </span>
             )}
           </div>
@@ -160,10 +184,10 @@ export const BatchRow: React.FC<BatchRowProps> = ({
               status === "Completed"
                 ? "bg-green-500"
                 : status === "Failed"
-                ? "bg-red-500"
-                : status === "Paused"
-                ? "bg-amber-500"
-                : "bg-blue-500"
+                  ? "bg-red-500"
+                  : status === "Paused"
+                    ? "bg-amber-500"
+                    : "bg-blue-500",
             )}
           />
           {status === "Processing" && metrics.eta > 0 && (
@@ -173,7 +197,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
           )}
         </div>
       </td>
-      <td className="py-3 px-4">
+      <td className="py-3 px-4" onClick={onRowClick}>
         <div className="flex items-center gap-2">
           <Badge
             variant="outline"
@@ -182,12 +206,12 @@ export const BatchRow: React.FC<BatchRowProps> = ({
               status === "Completed"
                 ? "bg-green-500/10 text-green-700 hover:bg-green-500/20"
                 : status === "Processing"
-                ? "bg-primary/10 text-primary hover:bg-primary/20"
-                : status === "Indexing"
-                ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
-                : status === "Paused"
-                ? "bg-amber-500/10 text-amber-700 hover:bg-amber-500/20"
-                : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                  ? "bg-primary/10 text-primary hover:bg-primary/20"
+                  : status === "Indexing"
+                    ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
+                    : status === "Paused"
+                      ? "bg-amber-500/10 text-amber-700 hover:bg-amber-500/20"
+                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
             )}
           >
             <span
@@ -196,14 +220,14 @@ export const BatchRow: React.FC<BatchRowProps> = ({
                 status === "Completed"
                   ? "bg-green-500 shadow-[0_0_5px_#22c55e]"
                   : status === "Processing" || status === "Indexing"
-                  ? "bg-primary animate-pulse shadow-[0_0_5px_#3b82f6]"
-                  : status === "Paused"
-                  ? "bg-amber-500"
-                  : "bg-gray-500"
+                    ? "bg-primary animate-pulse shadow-[0_0_5px_#3b82f6]"
+                    : status === "Paused"
+                      ? "bg-amber-500"
+                      : "bg-gray-500",
               )}
             />
             {status}
-            {isActionLoading && (
+            {(isActionLoading || isDeleting) && (
               <Loader2 className="h-2 w-2 ml-1 animate-spin" />
             )}
           </Badge>
@@ -260,10 +284,45 @@ export const BatchRow: React.FC<BatchRowProps> = ({
                 <Square className="h-3 w-3 fill-current" />
               </button>
             )}
+
+            {/* Delete Button with Confirmation */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  disabled={isDeleting}
+                  className="p-1 hover:bg-red-500/10 text-destructive rounded-md disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>确认删除此批次？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    此操作将永久删除批次{" "}
+                    <strong>{initialBatch.original_filename}</strong>{" "}
+                    及其所有关联的记录。此操作不可撤销。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>取消</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    确认删除
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </td>
-      <td className="py-3 px-4 text-right text-muted-foreground font-mono text-xs">
+      <td
+        className="py-3 px-4 text-right text-muted-foreground font-mono text-xs"
+        onClick={onRowClick}
+      >
         {new Date(initialBatch.created_at).toLocaleString(undefined, {
           year: "numeric",
           month: "2-digit",
@@ -273,7 +332,7 @@ export const BatchRow: React.FC<BatchRowProps> = ({
           hour12: false,
         })}
       </td>
-      <td className="py-3 px-4 pr-6 text-right">
+      <td className="py-3 px-4 pr-6 text-right" onClick={onRowClick}>
         <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-primary transition-colors" />
       </td>
     </tr>
