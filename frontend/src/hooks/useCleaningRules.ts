@@ -17,6 +17,18 @@ export const DEFAULT_RULES: ColumnRuleGroup[] = [
     column: "date",
     rules: [{ type: "date" }],
   },
+  {
+    column: "address_province",
+    rules: [{ type: "address", comp: "province" }],
+  },
+  {
+    column: "address_city",
+    rules: [{ type: "address", comp: "city" }],
+  },
+  {
+    column: "address_district",
+    rules: [{ type: "address", comp: "district" }],
+  },
 ];
 
 export const useCleaningRules = (

@@ -7,69 +7,13 @@ import (
 )
 
 var (
-	// regexPhone 匹配所有非数字字符，用于清理
-	regexPhone = regexp.MustCompile(`[^\d]`)
 	// regexDate 预编译日期格式正则以提升千万级处理速度
 	regexDate = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}$`)
 	// regexAddress 提取省市区的启发式正则
 	regexAddress = regexp.MustCompile(`^([^省]+省|[^自治区]+自治区|[^市]+市)([^市]+市|[^州]+州|[^县]+县|[^盟]+盟)?([^区]+区|[^县]+县|[^旗]+旗)?`)
-	// regexNormalName 匹配正常姓名字符：中文、字母、数字、空格、点、下划线
-	regexNormalName = regexp.MustCompile(`[^\p{Han}a-zA-Z0-9\s._-]`)
 	// regexChineseDate 提取中文日期格式，预编译以提升速度并减少分配
 	regexChineseDate = regexp.MustCompile(`(\d+)[年/-](\d+)[月/-](\d+)日?`)
 )
-
-// CleanName 清洗并验证姓名
-func CleanName(name string) (string, error) {
-	s := strings.TrimSpace(name)
-	if s == "" {
-		return "", fmt.Errorf("name cannot be empty")
-	}
-
-	// 过滤特殊字符和 Emoji (保留中文、英文、数字、基本分隔符)
-	cleaned := regexNormalName.ReplaceAllString(s, "")
-
-	if len(cleaned) < len(s) {
-		// 如果有字符被剔除，说明含有异常符号
-		return cleaned, fmt.Errorf("contains invalid characters or emojis")
-	}
-
-	return cleaned, nil
-}
-
-// CleanPhone 尝试清洗并规范化手机号
-func CleanPhone(phone string) (string, error) {
-	if phone == "" {
-		return "", fmt.Errorf("empty phone")
-	}
-
-	// 高性能清理：由于每秒处理 5w+ 行，避开 regexp.ReplaceAllString 的分配负载，改用手写 Loop
-	var b strings.Builder
-	b.Grow(len(phone))
-	for i := 0; i < len(phone); i++ {
-		if phone[i] >= '0' && phone[i] <= '9' {
-			b.WriteByte(phone[i])
-		}
-	}
-	cleaned := b.String()
-
-	// 2. 处理常见的中国手机号前缀（+86 或 86）
-	if strings.HasPrefix(cleaned, "86") && len(cleaned) == 13 {
-		cleaned = cleaned[2:]
-	}
-
-	// 3. 验证长度（中国标准 11 位）
-	if len(cleaned) != 11 {
-		return cleaned, fmt.Errorf("invalid length: %d (expected 11)", len(cleaned))
-	}
-
-	// 4. 验证首位必须为 1（中国手机号规则）
-	if cleaned[0] != '1' {
-		return cleaned, fmt.Errorf("invalid prefix: must start with 1")
-	}
-
-	return cleaned, nil
-}
 
 // CleanDate 尝试将各种日期格式转换为标准 YYYY-MM-DD
 func CleanDate(dateStr string) (string, error) {
@@ -170,29 +114,4 @@ func ExtractAddress(addr string) (province, city, district string) {
 	}
 
 	return province, city, district
-}
-
-// ValidateRecord 预判记录在清洗后的状态和错误信息
-func ValidateRecord(name, phone, date string) (status string, errorMessage string) {
-	var errors []string
-
-	_, errName := CleanName(name)
-	if errName != nil {
-		errors = append(errors, fmt.Sprintf("Name: %v", errName))
-	}
-
-	_, errPhone := CleanPhone(phone)
-	if errPhone != nil {
-		errors = append(errors, fmt.Sprintf("Phone: %v", errPhone))
-	}
-
-	_, errDate := CleanDate(date)
-	if errDate != nil {
-		errors = append(errors, fmt.Sprintf("Date: %v", errDate))
-	}
-
-	if len(errors) > 0 {
-		return "Error", fmt.Sprintf("%v", errors)
-	}
-	return "Clean", ""
 }

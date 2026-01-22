@@ -4,65 +4,6 @@ import (
 	"testing"
 )
 
-func TestCleanPhone(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    string
-		wantErr bool
-	}{
-		{
-			name:    "Valid phone number",
-			input:   "13812345678",
-			want:    "13812345678",
-			wantErr: false,
-		},
-		{
-			name:    "Phone with spaces",
-			input:   "138 1234 5678",
-			want:    "13812345678",
-			wantErr: false,
-		},
-		{
-			name:    "Phone with dashes",
-			input:   "138-1234-5678",
-			want:    "13812345678",
-			wantErr: false,
-		},
-		{
-			name:    "Too short",
-			input:   "1381234",
-			want:    "1381234",
-			wantErr: true,
-		},
-		{
-			name:    "Not starting with 1",
-			input:   "23812345678",
-			want:    "23812345678",
-			wantErr: true,
-		},
-		{
-			name:    "Empty string",
-			input:   "",
-			want:    "",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := CleanPhone(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("CleanPhone() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("CleanPhone() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCleanDate(t *testing.T) {
 	tests := []struct {
 		name    string

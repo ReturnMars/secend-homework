@@ -64,18 +64,38 @@ export default function ImportPage() {
         if (cols.length === 0) return;
 
         // Match columns with DEFAULT_RULES
-        const initialRules = cols.map((col) => {
+        const initialRules: any[] = [];
+        let hasAddress = false;
+
+        cols.forEach((col) => {
           const lowerCol = col.toLowerCase();
           const defaultMatch = DEFAULT_RULES.find(
             (dr) =>
-              dr.column.toLowerCase() === lowerCol || col.includes(dr.column),
+              (dr.column.toLowerCase() === lowerCol ||
+                col.includes(dr.column)) &&
+              !dr.column.startsWith("address_"),
           );
 
-          return {
+          initialRules.push({
             column: col,
             rules: defaultMatch ? [...defaultMatch.rules] : [],
-          };
+          });
+
+          if (lowerCol.includes("address") || col.includes("地址")) {
+            hasAddress = true;
+          }
         });
+
+        if (hasAddress) {
+          const addressRules = DEFAULT_RULES.filter((dr) =>
+            dr.column.startsWith("address_"),
+          );
+          addressRules.forEach((ar) => {
+            if (!initialRules.find((ir) => ir.column === ar.column)) {
+              initialRules.push({ ...ar, rules: [...ar.rules] });
+            }
+          });
+        }
 
         setRules(initialRules);
       };
