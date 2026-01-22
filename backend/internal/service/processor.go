@@ -193,6 +193,12 @@ func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, fi
 	// 数据已全部入库，但在搜索生效前需要重建索引
 	if err == nil {
 		s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).Update("status", model.BatchStatusIndexing)
+
+		// 关键：进入索引阶段后，从 activeTasks 移除，防止被错误中断
+		// 暂停请求会检测到 Indexing 状态并返回相应错误
+		activeTasksMu.Lock()
+		delete(activeTasks, batchID)
+		activeTasksMu.Unlock()
 	}
 
 	// 关键：无论成功还是中断（暂停/取消），都应尝试重建索引，以便用户在界面上能正常搜索已导入的数据
@@ -566,11 +572,28 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 func (s *CleanerService) PauseBatch(batchID uint) error {
 	activeTasksMu.Lock()
 	cancel, exists := activeTasks[batchID]
-	if exists {
-		cancel()
-	}
 	activeTasksMu.Unlock()
 
+	if !exists {
+		// 任务不在运行中（可能已完成、已取消、或正在索引重建）
+		// 检查当前状态，避免覆盖已完成的状态
+		var batch model.ImportBatch
+		if err := s.DB.First(&batch, batchID).Error; err != nil {
+			return fmt.Errorf("batch not found: %w", err)
+		}
+		if batch.Status == model.BatchStatusCompleted {
+			return fmt.Errorf("batch already completed, cannot pause")
+		}
+		if batch.Status == model.BatchStatusIndexing {
+			return fmt.Errorf("batch is in indexing phase, cannot pause")
+		}
+		if batch.Status == model.BatchStatusPaused {
+			return nil // 已经是暂停状态
+		}
+		return fmt.Errorf("batch is not currently running")
+	}
+
+	cancel()
 	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 		Update("status", model.BatchStatusPaused).Error
 }
@@ -595,11 +618,32 @@ func (s *CleanerService) ResumeBatch(batchID uint) error {
 func (s *CleanerService) CancelBatch(batchID uint) error {
 	activeTasksMu.Lock()
 	cancel, exists := activeTasks[batchID]
-	if exists {
-		cancel()
-	}
 	activeTasksMu.Unlock()
 
+	if !exists {
+		// 任务不在运行中，检查当前状态
+		var batch model.ImportBatch
+		if err := s.DB.First(&batch, batchID).Error; err != nil {
+			return fmt.Errorf("batch not found: %w", err)
+		}
+		if batch.Status == model.BatchStatusCompleted {
+			return fmt.Errorf("batch already completed, cannot cancel")
+		}
+		if batch.Status == model.BatchStatusCancelled {
+			return nil // 已经是取消状态
+		}
+		if batch.Status == model.BatchStatusIndexing {
+			return fmt.Errorf("batch is in indexing phase, please wait")
+		}
+		// 对于 Paused 状态，允许取消
+		if batch.Status == model.BatchStatusPaused {
+			return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+				Update("status", model.BatchStatusCancelled).Error
+		}
+		return fmt.Errorf("batch is not currently running")
+	}
+
+	cancel()
 	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 		Update("status", model.BatchStatusCancelled).Error
 }
