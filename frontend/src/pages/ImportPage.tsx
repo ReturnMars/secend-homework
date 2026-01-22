@@ -38,6 +38,7 @@ export default function ImportPage() {
     speed: 0,
   });
   const [processProgress, setProcessProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const { rules, addRule, removeRule, updateRule, setRules } =
     useCleaningRules();
@@ -88,8 +89,32 @@ export default function ImportPage() {
     try {
       setPhase("uploading");
 
-      const buffer = await file.arrayBuffer();
-      const fileHash = sha256(buffer);
+      // 采样哈希策略（头2MB + 中间2MB + 尾2MB + 文件大小）
+      const SAMPLE_SIZE = 2 * 1024 * 1024; // 2MB
+      const fileSize = file.size;
+
+      let hashInput: ArrayBuffer;
+      if (fileSize <= SAMPLE_SIZE * 3) {
+        hashInput = await file.arrayBuffer();
+      } else {
+        const head = await file.slice(0, SAMPLE_SIZE).arrayBuffer();
+        const midStart = Math.floor(fileSize / 2) - Math.floor(SAMPLE_SIZE / 2);
+        const middle = await file
+          .slice(midStart, midStart + SAMPLE_SIZE)
+          .arrayBuffer();
+        const tail = await file
+          .slice(fileSize - SAMPLE_SIZE, fileSize)
+          .arrayBuffer();
+
+        const combined = new Uint8Array(SAMPLE_SIZE * 3 + 8);
+        combined.set(new Uint8Array(head), 0);
+        combined.set(new Uint8Array(middle), SAMPLE_SIZE);
+        combined.set(new Uint8Array(tail), SAMPLE_SIZE * 2);
+        const sizeView = new DataView(combined.buffer, SAMPLE_SIZE * 3, 8);
+        sizeView.setBigUint64(0, BigInt(fileSize), true);
+        hashInput = combined.buffer;
+      }
+      const fileHash = sha256(hashInput);
 
       let physicalExists = false;
       try {
@@ -101,15 +126,24 @@ export default function ImportPage() {
         console.warn("Hash check failed", e);
       }
 
-      const formData = new FormData();
-      formData.append("hash", fileHash);
-      formData.append("filename", file.name);
-      formData.append("rules", JSON.stringify(rules));
-      if (!physicalExists) {
-        formData.append("file", file);
-      }
+      let res: { batch_id: string };
 
-      const res = await api.post<{ batch_id: string }>("/upload", formData);
+      if (physicalExists) {
+        // 秒传模式：只发送元数据
+        const formData = new FormData();
+        formData.append("hash", fileHash);
+        formData.append("filename", file.name);
+        formData.append("rules", JSON.stringify(rules));
+        res = await api.post<{ batch_id: string }>("/upload", formData);
+      } else {
+        // 正常上传：使用 api.upload 支持进度
+        res = await api.upload<{ batch_id: string }>(
+          "/upload",
+          file,
+          (percent) => setUploadProgress(percent),
+          { hash: fileHash, rules: JSON.stringify(rules) },
+        );
+      }
       setBatchId(res.batch_id);
       setPhase("processing");
       toast.success(physicalExists ? "文件秒传成功 (Instant)" : "上传完成。");
@@ -147,9 +181,13 @@ export default function ImportPage() {
             });
             setProcessProgress(data.percent);
 
+            // 处理各种完成状态
             if (data.status === "Completed" || data.percent >= 100) {
               setPhase("completed");
               eventSource?.close();
+            } else if (data.status === "Indexing") {
+              // 索引阶段：保持 processing 状态但更新进度显示
+              setProcessProgress(99); // 显示接近完成
             }
           } else if (data.type === "completed") {
             setMetrics((prev) => ({
@@ -271,7 +309,7 @@ export default function ImportPage() {
             </div>
 
             <AnimatePresence mode="wait">
-              {phase === "idle" || phase === "uploading" ? (
+              {phase === "idle" ? (
                 <motion.div
                   key="upload"
                   initial={{ opacity: 0, y: 10 }}
@@ -279,6 +317,38 @@ export default function ImportPage() {
                   exit={{ opacity: 0, scale: 0.95 }}
                 >
                   <UploadDropZone file={file} onFileSelect={handleFileSelect} />
+                </motion.div>
+              ) : phase === "uploading" ? (
+                <motion.div
+                  key="uploading"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-8 rounded-[32px] border-2 border-dashed border-primary/30 bg-primary/5"
+                >
+                  <div className="text-center space-y-4">
+                    <div className="h-12 w-12 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
+                      <Rocket className="h-6 w-6 text-primary animate-pulse" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-foreground">
+                        正在上传文件...
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {file?.name}
+                      </p>
+                    </div>
+                    <div className="w-full max-w-xs mx-auto space-y-2">
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-300 ease-out"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                      <p className="text-xs font-mono text-primary">
+                        {uploadProgress}%
+                      </p>
+                    </div>
+                  </div>
                 </motion.div>
               ) : (
                 <motion.div

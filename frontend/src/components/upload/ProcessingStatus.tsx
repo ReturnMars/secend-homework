@@ -77,27 +77,31 @@ const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
               </h3>
               <Badge variant="outline" className="font-bold">
                 当前阶段:{" "}
-                {phase === "uploading"
-                  ? "上传中"
-                  : phase === "processing"
-                    ? "清洗中"
-                    : phase === "completed"
-                      ? "已完成"
-                      : "空闲"}
+                {status === "Indexing"
+                  ? "建立索引"
+                  : phase === "uploading"
+                    ? "上传中"
+                    : phase === "processing"
+                      ? "清洗中"
+                      : phase === "completed"
+                        ? "已完成"
+                        : "空闲"}
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground font-medium">
-              {phase === "processing"
-                ? "引擎正在校验并清洗记录..."
-                : phase === "completed"
-                  ? "所有记录处理完毕。"
-                  : "等待操作..."}
+              {status === "Indexing"
+                ? "正在建立搜索索引，请稍候..."
+                : phase === "processing"
+                  ? "引擎正在校验并清洗记录..."
+                  : phase === "completed"
+                    ? "所有记录处理完毕。"
+                    : "等待操作..."}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {phase === "processing" && (
+          {phase === "processing" && status !== "Indexing" && (
             <>
               <Button
                 variant="outline"
@@ -141,7 +145,11 @@ const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
             </span>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black">{metrics.speed}</span>
+            <span className="text-2xl font-black">
+              {metrics.speed >= 1000
+                ? `${(metrics.speed / 1000).toFixed(1)}K`
+                : Math.round(metrics.speed)}
+            </span>
             <span className="text-[10px] font-bold text-muted-foreground uppercase">
               行/秒
             </span>

@@ -116,10 +116,38 @@ const UploadZone: React.FC<UploadZoneProps> = ({ onSuccess }) => {
       setUploading(true);
       setError(null);
 
-      // 1. Hash Calculation
+      // 1. Hash Calculation (采样哈希，避免大文件卡死浏览器)
+      // 策略：文件头2MB + 中间2MB + 尾部2MB + 文件大小
       setPhase("hashing");
-      const buffer = await file.arrayBuffer();
-      const fileHash = sha256(buffer);
+      const SAMPLE_SIZE = 2 * 1024 * 1024; // 2MB
+      const fileSize = file.size;
+
+      let hashInput: ArrayBuffer;
+      if (fileSize <= SAMPLE_SIZE * 3) {
+        // 小文件：直接全文件哈希
+        hashInput = await file.arrayBuffer();
+      } else {
+        // 大文件：采样哈希
+        const head = await file.slice(0, SAMPLE_SIZE).arrayBuffer();
+        const midStart = Math.floor(fileSize / 2) - Math.floor(SAMPLE_SIZE / 2);
+        const middle = await file
+          .slice(midStart, midStart + SAMPLE_SIZE)
+          .arrayBuffer();
+        const tail = await file
+          .slice(fileSize - SAMPLE_SIZE, fileSize)
+          .arrayBuffer();
+
+        // 合并采样 + 文件大小作为盐值
+        const combined = new Uint8Array(SAMPLE_SIZE * 3 + 8);
+        combined.set(new Uint8Array(head), 0);
+        combined.set(new Uint8Array(middle), SAMPLE_SIZE);
+        combined.set(new Uint8Array(tail), SAMPLE_SIZE * 2);
+        // 将文件大小编码为8字节（BigInt方式）
+        const sizeView = new DataView(combined.buffer, SAMPLE_SIZE * 3, 8);
+        sizeView.setBigUint64(0, BigInt(fileSize), true);
+        hashInput = combined.buffer;
+      }
+      const fileHash = sha256(hashInput);
 
       // 2. Check duplicate first (Physical file exists?)
       let physicalExists = false;
