@@ -188,7 +188,7 @@ func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, fi
 
 	// 6. 极致性能：针对千万级数据，先卸载索引，写完后瞬间重建
 	repository.DropSearchIndexes()
-	stats, err := s.processRows(ctx, iter, batchID, indices, skipRows, engine)
+	stats, err := s.processRows(ctx, iter, header, batchID, indices, skipRows, engine)
 
 	// 数据已全部入库，但在搜索生效前需要重建索引
 	if err == nil {
@@ -305,7 +305,7 @@ func getAdaptiveConfig() (numWorkers int, numSavers int, bufferSize int, batchSi
 }
 
 // processRows 采用高度并发的 Worker Pool 模式处理数据
-func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator, batchID uint, indices utils.ColIndices, skipRows int, engine *RuleEngine) (*processStats, error) {
+func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator, header []string, batchID uint, indices utils.ColIndices, skipRows int, engine *RuleEngine) (*processStats, error) {
 	// 自适应配置
 	numWorkers, numSavers, bufferSize, batchSize := getAdaptiveConfig()
 
@@ -318,6 +318,19 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 	type task struct {
 		row []string
 		idx int
+	}
+
+	// 准备列名映射，用于规则匹配
+	colNames := struct {
+		Name    string
+		Phone   string
+		Address string
+		Date    string
+	}{
+		Name:    getHeaderName(header, indices.Name, "name"),
+		Phone:   getHeaderName(header, indices.Phone, "phone"),
+		Address: getHeaderName(header, indices.Address, "address"),
+		Date:    getHeaderName(header, indices.Date, "date"),
 	}
 
 	// Channel 定义，根据可用内存自动调整缓冲区大小
@@ -335,7 +348,7 @@ func (s *CleanerService) processRows(ctx context.Context, iter utils.RowIterator
 		go func() {
 			defer wg.Done()
 			for t := range taskChan {
-				rec := s.createRecordFromRow(t.row, batchID, t.idx, indices, engine)
+				rec := s.createRecordFromRow(t.row, batchID, t.idx, indices, colNames, engine)
 				if rec.Status == "Clean" {
 					atomic.AddInt64(&successCount, 1)
 				} else {
@@ -510,7 +523,12 @@ Loop:
 }
 
 // createRecordFromRow 从原始行数据创建 Record
-func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx int, indices utils.ColIndices, engine *RuleEngine) model.Record {
+func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx int, indices utils.ColIndices, colNames struct {
+	Name    string
+	Phone   string
+	Address string
+	Date    string
+}, engine *RuleEngine) model.Record {
 	getCol := func(idx int) string {
 		if idx >= 0 && idx < len(row) {
 			return row[idx]
@@ -531,19 +549,19 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 	var errors []string
 
 	// 动态清洗
-	cleanName, err := engine.Execute("name", rawName)
+	cleanName, err := engine.Execute(colNames.Name, rawName)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Name: %v", err))
 	}
 	rec.Name = utils.Truncate(cleanName, 255)
 
-	cleanPhone, err := engine.Execute("phone", rawPhone)
+	cleanPhone, err := engine.Execute(colNames.Phone, rawPhone)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Phone: %v", err))
 	}
 	rec.Phone = utils.Truncate(cleanPhone, 50)
 
-	cleanDate, err := engine.Execute("date", rawDate)
+	cleanDate, err := engine.Execute(colNames.Date, rawDate)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("Date: %v", err))
 	}
@@ -654,4 +672,11 @@ func (s *CleanerService) GetBatchSpeed(batchID uint) float64 {
 		return val.(float64)
 	}
 	return 0
+}
+
+func getHeaderName(header []string, idx int, fallback string) string {
+	if idx >= 0 && idx < len(header) {
+		return header[idx]
+	}
+	return fallback
 }

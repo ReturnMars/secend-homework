@@ -57,6 +57,20 @@ func (h *CsvHandler) CheckHash(c *gin.Context) {
 	utils.SuccessResponse(c, gin.H{"exists": false})
 }
 
+// SuggestRules 根据提供的表头建议清洗规则
+func (h *CsvHandler) SuggestRules(c *gin.Context) {
+	var body struct {
+		Headers []string `json:"headers" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing 'headers' in request body"})
+		return
+	}
+
+	suggestions := service.GetSuggestedRules(body.Headers)
+	utils.SuccessResponse(c, suggestions)
+}
+
 // Upload handles the CSV upload with streaming and de-duplication
 func (h *CsvHandler) Upload(c *gin.Context) {
 	mr, err := c.Request.MultipartReader()

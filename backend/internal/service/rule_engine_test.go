@@ -9,7 +9,7 @@ func TestRuleEngine_Execute(t *testing.T) {
 		{
 			"column": "phone",
 			"rules": [
-				{"type": "required"},
+				{"type": "replace", "old": "16853168891", "new": "16853168892"},
 				{"type": "replace", "old": " ", "new": ""},
 				{"type": "regex", "pattern": "^1\\d{10}$"}
 			]
@@ -36,8 +36,9 @@ func TestRuleEngine_Execute(t *testing.T) {
 	}{
 		{"phone", "13800138000", "13800138000", false},
 		{"phone", "138 0013 8000", "13800138000", false},
-		{"phone", "23800138000", "23800138000", true}, // Regex fails
-		{"phone", "", "", true},                       // Required fails
+		{"phone", "23800138000", "23800138000", true},  // Regex fails
+		{"phone", "", "", true},                        // Required fails
+		{"phone", "16853168891", "16853168892", false}, // User's case
 		{"name", "AI", "AI", false},
 		{"name", "A", "A", true},                                   // Length fails (min 2)
 		{"name", "VeryLongNameIndeed", "VeryLongNameIndeed", true}, // Length fails (max 10)

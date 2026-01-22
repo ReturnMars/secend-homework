@@ -7,6 +7,97 @@ import (
 	"strings"
 )
 
+// DefaultRuleConfigs 定义了系统内置的默认规则。
+// 这些规则会根据列名进行启发式匹配。
+var DefaultRuleConfigs = []RuleConfig{
+	{
+		Column: "phone",
+		Rules: []struct {
+			Type    string      `json:"type"`
+			Pattern string      `json:"pattern,omitempty"`
+			Min     int         `json:"min,omitempty"`
+			Max     int         `json:"max,omitempty"`
+			Old     interface{} `json:"old,omitempty"`
+			New     interface{} `json:"new,omitempty"`
+			Comp    string      `json:"comp,omitempty"`
+		}{
+			{Type: "replace", Old: " ", New: ""},
+			{Type: "regex", Pattern: `^1[3-9]\d{9}$`},
+		},
+	},
+	{
+		Column: "name",
+		Rules: []struct {
+			Type    string      `json:"type"`
+			Pattern string      `json:"pattern,omitempty"`
+			Min     int         `json:"min,omitempty"`
+			Max     int         `json:"max,omitempty"`
+			Old     interface{} `json:"old,omitempty"`
+			New     interface{} `json:"new,omitempty"`
+			Comp    string      `json:"comp,omitempty"`
+		}{
+			{Type: "required"},
+			{Type: "length", Min: 2, Max: 20},
+		},
+	},
+	{
+		Column: "date",
+		Rules: []struct {
+			Type    string      `json:"type"`
+			Pattern string      `json:"pattern,omitempty"`
+			Min     int         `json:"min,omitempty"`
+			Max     int         `json:"max,omitempty"`
+			Old     interface{} `json:"old,omitempty"`
+			New     interface{} `json:"new,omitempty"`
+			Comp    string      `json:"comp,omitempty"`
+		}{
+			{Type: "date"},
+		},
+	},
+	{
+		Column: "address_province",
+		Rules: []struct {
+			Type    string      `json:"type"`
+			Pattern string      `json:"pattern,omitempty"`
+			Min     int         `json:"min,omitempty"`
+			Max     int         `json:"max,omitempty"`
+			Old     interface{} `json:"old,omitempty"`
+			New     interface{} `json:"new,omitempty"`
+			Comp    string      `json:"comp,omitempty"`
+		}{
+			{Type: "address", Comp: "province"},
+		},
+	},
+	{
+		Column: "address_city",
+		Rules: []struct {
+			Type    string      `json:"type"`
+			Pattern string      `json:"pattern,omitempty"`
+			Min     int         `json:"min,omitempty"`
+			Max     int         `json:"max,omitempty"`
+			Old     interface{} `json:"old,omitempty"`
+			New     interface{} `json:"new,omitempty"`
+			Comp    string      `json:"comp,omitempty"`
+		}{
+			{Type: "address", Comp: "city"},
+		},
+	},
+	{
+		Column: "address_district",
+		Rules: []struct {
+			Type    string      `json:"type"`
+			Pattern string      `json:"pattern,omitempty"`
+			Min     int         `json:"min,omitempty"`
+			Max     int         `json:"max,omitempty"`
+			Old     interface{} `json:"old,omitempty"`
+			New     interface{} `json:"new,omitempty"`
+			Comp    string      `json:"comp,omitempty"`
+		}{
+			{Type: "address", Comp: "district"},
+		},
+	},
+}
+
 // CleaningStrategy 定义了数据清洗和校验的通用接口
 type CleaningStrategy interface {
 	// Clean 执行清洗/校验逻辑。返回清洗后的字符串或错误。
@@ -76,7 +167,7 @@ type ReplaceStrategy struct {
 }
 
 func (s *ReplaceStrategy) Clean(input string) (string, error) {
-	return strings.ReplaceAll(input, s.Old, s.New), nil
+	return strings.ReplaceAll(input, fmt.Sprintf("%v", s.Old), fmt.Sprintf("%v", s.New)), nil
 }
 
 func (s *ReplaceStrategy) GetType() string { return "replace" }
@@ -126,13 +217,13 @@ func NewRuleEngine() *RuleEngine {
 type RuleConfig struct {
 	Column string `json:"column"`
 	Rules  []struct {
-		Type    string `json:"type"`
-		Pattern string `json:"pattern,omitempty"`
-		Min     int    `json:"min,omitempty"`
-		Max     int    `json:"max,omitempty"`
-		Old     string `json:"old,omitempty"`
-		New     string `json:"new,omitempty"`
-		Comp    string `json:"comp,omitempty"`
+		Type    string      `json:"type"`
+		Pattern string      `json:"pattern,omitempty"`
+		Min     int         `json:"min,omitempty"`
+		Max     int         `json:"max,omitempty"`
+		Old     interface{} `json:"old,omitempty"`
+		New     interface{} `json:"new,omitempty"`
+		Comp    string      `json:"comp,omitempty"`
 	} `json:"rules"`
 }
 
@@ -157,7 +248,10 @@ func (e *RuleEngine) LoadConfig(jsonData []byte) error {
 			case "length":
 				s = &LengthStrategy{Min: r.Min, Max: r.Max}
 			case "replace":
-				s = &ReplaceStrategy{Old: r.Old, New: r.New}
+				s = &ReplaceStrategy{
+					Old: fmt.Sprintf("%v", r.Old),
+					New: fmt.Sprintf("%v", r.New),
+				}
 			case "date":
 				s = &DateStrategy{}
 			case "address":
@@ -171,15 +265,72 @@ func (e *RuleEngine) LoadConfig(jsonData []byte) error {
 			}
 			strategies = append(strategies, s)
 		}
-		e.ColumnRules[cfg.Column] = strategies
+		e.ColumnRules[strings.ToLower(cfg.Column)] = strategies
 	}
 	return nil
 }
 
+// GetSuggestedRules 根据提供的 headers 返回建议的规则。
+func GetSuggestedRules(headers []string) []RuleConfig {
+	var suggestions []RuleConfig
+	hasAddress := false
+
+	for _, h := range headers {
+		lowerH := strings.ToLower(h)
+		var matchedRule *RuleConfig
+
+		// 精确或包含匹配（排除 address_ 开头的特殊内置列）
+		for _, dr := range DefaultRuleConfigs {
+			if !strings.HasPrefix(dr.Column, "address_") {
+				if strings.ToLower(dr.Column) == lowerH || strings.Contains(lowerH, strings.ToLower(dr.Column)) {
+					matchedRule = &dr
+					break
+				}
+			}
+		}
+
+		if matchedRule != nil {
+			// 复制规则以防修改原件（虽然这里是值传递，但 Rules 是 slice）
+			newRule := RuleConfig{Column: h}
+			newRule.Rules = append(newRule.Rules, matchedRule.Rules...)
+			suggestions = append(suggestions, newRule)
+		} else {
+			// 如果没匹配到默认规则，也返回该列以便展示，但规则为空
+			suggestions = append(suggestions, RuleConfig{Column: h, Rules: nil})
+		}
+
+		if strings.Contains(lowerH, "address") || strings.Contains(h, "地址") {
+			hasAddress = true
+		}
+	}
+
+	// 如果包含地址列，自动添加省市区解析建议
+	if hasAddress {
+		for _, dr := range DefaultRuleConfigs {
+			if strings.HasPrefix(dr.Column, "address_") {
+				// 检查是否已经存在同名列
+				exists := false
+				for _, s := range suggestions {
+					if s.Column == dr.Column {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					suggestions = append(suggestions, dr)
+				}
+			}
+		}
+	}
+
+	return suggestions
+}
+
 // Execute 对指定列的数据运行所有定义的策略
 func (e *RuleEngine) Execute(columnName string, input string) (string, error) {
-	strategies, ok := e.ColumnRules[columnName]
+	strategies, ok := e.ColumnRules[strings.ToLower(columnName)]
 	if !ok {
+		// log.Printf("[RuleEngine] No rules for column: %s", columnName)
 		return input, nil
 	}
 

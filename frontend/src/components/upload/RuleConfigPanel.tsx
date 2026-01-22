@@ -12,11 +12,19 @@ import {
   Calendar,
   Layers,
   CheckCircle2,
+  MapPin,
 } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ColumnRuleGroup, CleaningRule } from "../../types/cleaning-rules";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -39,6 +47,7 @@ const RULE_TYPE_ICONS: Record<string, any> = {
   length: <Layers className="h-3.5 w-3.5" />,
   required: <AlertCircle className="h-3.5 w-3.5" />,
   date: <Calendar className="h-3.5 w-3.5" />,
+  address: <MapPin className="h-3.5 w-3.5" />,
 };
 
 const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
@@ -49,9 +58,13 @@ const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
   onRemoveRule,
   onUpdateRule,
 }) => {
-  const [selectedColumn, setSelectedColumn] = useState<string | null>(
-    rules.length > 0 ? rules[0].column : null,
-  );
+  const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (rules.length > 0 && !selectedColumn) {
+      setSelectedColumn(rules[0].column);
+    }
+  }, [rules, selectedColumn]);
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredRules = rules.filter((r) =>
@@ -155,7 +168,7 @@ const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
                         <CheckCircle2
                           className={clsx(
                             "h-3 w-3 shrink-0 transition-opacity",
-                            colGroup.rules.length > 0
+                            colGroup.rules && colGroup.rules.length > 0
                               ? "opacity-100 text-green-500"
                               : "opacity-20",
                           )}
@@ -165,7 +178,7 @@ const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
                         </span>
                       </div>
                       <Badge variant="secondary" className="font-black">
-                        {colGroup.rules.length}
+                        {colGroup.rules ? colGroup.rules.length : 0}
                       </Badge>
                     </button>
                   ))}
@@ -175,7 +188,10 @@ const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
               {/* Main Area: Rule Editor */}
               <div className="flex-1 overflow-y-auto bg-background/20 relative custom-scrollbar">
                 {activeGroup ? (
-                  <div className="p-8 space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
+                  <div
+                    key={activeGroup.column}
+                    className="p-8 space-y-8 animate-in fade-in slide-in-from-right-4 duration-300"
+                  >
                     <div className="flex items-center justify-between sticky top-0 bg-transparent z-10">
                       <div>
                         <h4 className="text-xl font-black text-foreground flex items-center gap-2">
@@ -196,182 +212,244 @@ const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
                     </div>
 
                     <div className="space-y-4">
-                      <AnimatePresence initial={false}>
-                        {activeGroup.rules.map((rule, idx) => (
-                          <motion.div
-                            key={`${activeGroup.column}-${idx}`}
-                            initial={{ scale: 0.95, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.95, opacity: 0 }}
-                            className="bg-muted/30 backdrop-blur-sm rounded-2xl border border-primary/5 p-5 relative group"
-                          >
-                            <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <AnimatePresence mode="popLayout">
+                        {activeGroup.rules &&
+                          activeGroup.rules.map((rule, idx) => (
+                            <motion.div
+                              key={`${activeGroup.column}-${idx}`}
+                              initial={{ scale: 0.95, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              exit={{ scale: 0.95, opacity: 0 }}
+                              className="bg-muted/30 backdrop-blur-sm rounded-2xl border border-primary/5 p-5 relative group"
+                            >
+                              <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
 
-                            <div className="flex items-start gap-6">
-                              <div className="flex flex-col gap-2 min-w-[120px]">
-                                <label className="text-[9px] font-black text-primary/60 uppercase tracking-widest ml-1">
-                                  处理类型
-                                </label>
-                                <div className="grid grid-cols-1 gap-1 relative">
-                                  <div className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">
-                                    {RULE_TYPE_ICONS[rule.type]}
+                              <div className="flex items-start gap-6">
+                                <div className="flex flex-col gap-2 min-w-[120px]">
+                                  <label className="text-[9px] font-black text-primary/60 uppercase tracking-widest ml-1">
+                                    处理类型
+                                  </label>
+                                  <div className="grid grid-cols-1 gap-1 relative">
+                                    <Select
+                                      value={rule.type}
+                                      onValueChange={(value) =>
+                                        onUpdateRule(activeGroup.column, idx, {
+                                          type: value as any,
+                                        })
+                                      }
+                                    >
+                                      <SelectTrigger className="h-9 min-w-[130px] pl-9 text-[11px] font-black uppercase tracking-wider bg-background/80 border-primary/10 rounded-xl">
+                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">
+                                          {RULE_TYPE_ICONS[rule.type]}
+                                        </div>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="regex">
+                                          正则匹配
+                                        </SelectItem>
+                                        <SelectItem value="replace">
+                                          内容替换
+                                        </SelectItem>
+                                        <SelectItem value="length">
+                                          长度限制
+                                        </SelectItem>
+                                        <SelectItem value="required">
+                                          必填校验
+                                        </SelectItem>
+                                        <SelectItem value="date">
+                                          日期清洗
+                                        </SelectItem>
+                                        <SelectItem value="address">
+                                          地址解析
+                                        </SelectItem>
+                                      </SelectContent>
+                                    </Select>
                                   </div>
-                                  <select
-                                    className="bg-background/80 border border-primary/10 rounded-xl pl-9 pr-3 py-2 text-[11px] font-black outline-none focus:border-primary/40 transition-all appearance-none cursor-pointer uppercase tracking-wider"
-                                    value={rule.type}
-                                    onChange={(e) =>
-                                      onUpdateRule(activeGroup.column, idx, {
-                                        type: e.target.value as any,
-                                      })
+                                </div>
+
+                                <div className="flex-1 space-y-2">
+                                  <label className="text-[9px] font-black text-foreground/40 uppercase tracking-widest ml-1">
+                                    Configuration
+                                  </label>
+                                  <div className="bg-background/40 rounded-xl p-3 border border-primary/5 min-h-[46px] flex items-center">
+                                    {rule.type === "regex" && (
+                                      <div className="flex items-center gap-3 w-full">
+                                        <Hash className="h-4 w-4 text-primary opacity-40 shrink-0" />
+                                        <Input
+                                          className="font-mono text-sm"
+                                          placeholder="正则表达式 (例如: ^1\d{10}$)"
+                                          value={rule.pattern || ""}
+                                          onChange={(e) =>
+                                            onUpdateRule(
+                                              activeGroup.column,
+                                              idx,
+                                              {
+                                                pattern: e.target.value,
+                                              },
+                                            )
+                                          }
+                                        />
+                                      </div>
+                                    )}
+
+                                    {rule.type === "replace" && (
+                                      <div className="flex items-center gap-4 w-full min-w-0">
+                                        <div className="flex-1 min-w-0">
+                                          <Input
+                                            placeholder="查找内容..."
+                                            value={rule.old || ""}
+                                            onChange={(e) =>
+                                              onUpdateRule(
+                                                activeGroup.column,
+                                                idx,
+                                                {
+                                                  old: e.target.value,
+                                                },
+                                              )
+                                            }
+                                          />
+                                        </div>
+                                        <ChevronRight className=" text-muted-foreground opacity-30 shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                          <Input
+                                            placeholder="替换为..."
+                                            className="text-primary font-bold"
+                                            value={rule.new || ""}
+                                            onChange={(e) =>
+                                              onUpdateRule(
+                                                activeGroup.column,
+                                                idx,
+                                                {
+                                                  new: e.target.value,
+                                                },
+                                              )
+                                            }
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {rule.type === "length" && (
+                                      <div className="flex items-center gap-8 w-full">
+                                        <div className="flex items-center gap-3">
+                                          <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
+                                            最小
+                                          </span>
+                                          <Input
+                                            type="number"
+                                            className="w-20 text-center"
+                                            value={rule.min || ""}
+                                            onChange={(e) =>
+                                              onUpdateRule(
+                                                activeGroup.column,
+                                                idx,
+                                                {
+                                                  min:
+                                                    parseInt(e.target.value) ||
+                                                    0,
+                                                },
+                                              )
+                                            }
+                                          />
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
+                                            最大
+                                          </span>
+                                          <Input
+                                            type="number"
+                                            className="w-20 text-center"
+                                            value={rule.max || ""}
+                                            onChange={(e) =>
+                                              onUpdateRule(
+                                                activeGroup.column,
+                                                idx,
+                                                {
+                                                  max:
+                                                    parseInt(e.target.value) ||
+                                                    0,
+                                                },
+                                              )
+                                            }
+                                          />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {(rule.type === "required" ||
+                                      rule.type === "date") && (
+                                      <div className="flex items-center gap-2 text-primary/60">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                        <span className="text-[10px] font-black uppercase tracking-widest">
+                                          {rule.type === "required"
+                                            ? "字段不能为空"
+                                            : "转换为 YYYY-MM-DD 格式"}
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {rule.type === "address" && (
+                                      <div className="flex items-center gap-8 w-full">
+                                        <div className="flex items-center gap-3">
+                                          <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
+                                            解析组件
+                                          </span>
+                                          <Select
+                                            value={rule.comp || "province"}
+                                            onValueChange={(value) =>
+                                              onUpdateRule(
+                                                activeGroup.column,
+                                                idx,
+                                                {
+                                                  comp: value as any,
+                                                },
+                                              )
+                                            }
+                                          >
+                                            <SelectTrigger className="h-9 min-w-[100px] text-sm font-medium bg-background/80 border-primary/10 rounded-md">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="province">
+                                                省份
+                                              </SelectItem>
+                                              <SelectItem value="city">
+                                                城市
+                                              </SelectItem>
+                                              <SelectItem value="district">
+                                                区县
+                                              </SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="pt-6">
+                                  <button
+                                    onClick={() =>
+                                      onRemoveRule(activeGroup.column, idx)
                                     }
+                                    className="h-10 w-10 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all duration-300 transform hover:rotate-12"
                                   >
-                                    <option value="regex">正则匹配</option>
-                                    <option value="replace">内容替换</option>
-                                    <option value="length">长度限制</option>
-                                    <option value="required">必填校验</option>
-                                    <option value="date">日期清洗</option>
-                                  </select>
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
                                 </div>
                               </div>
-
-                              <div className="flex-1 space-y-2">
-                                <label className="text-[9px] font-black text-foreground/40 uppercase tracking-widest ml-1">
-                                  Configuration
-                                </label>
-                                <div className="bg-background/40 rounded-xl p-3 border border-primary/5 min-h-[46px] flex items-center">
-                                  {rule.type === "regex" && (
-                                    <div className="flex items-center gap-3 w-full">
-                                      <Hash className="h-4 w-4 text-primary opacity-40 shrink-0" />
-                                      <Input
-                                        className="font-mono text-sm"
-                                        placeholder="正则表达式 (例如: ^1\d{10}$)"
-                                        value={rule.pattern || ""}
-                                        onChange={(e) =>
-                                          onUpdateRule(
-                                            activeGroup.column,
-                                            idx,
-                                            {
-                                              pattern: e.target.value,
-                                            },
-                                          )
-                                        }
-                                      />
-                                    </div>
-                                  )}
-
-                                  {rule.type === "replace" && (
-                                    <div className="flex items-center gap-4 w-full min-w-0">
-                                      <div className="flex-1 min-w-0">
-                                        <Input
-                                          placeholder="查找内容..."
-                                          value={rule.old || ""}
-                                          onChange={(e) =>
-                                            onUpdateRule(
-                                              activeGroup.column,
-                                              idx,
-                                              {
-                                                old: e.target.value,
-                                              },
-                                            )
-                                          }
-                                        />
-                                      </div>
-                                      <ChevronRight className=" text-muted-foreground opacity-30 shrink-0" />
-                                      <div className="flex-1 min-w-0">
-                                        <Input
-                                          placeholder="替换为..."
-                                          className="text-primary font-bold"
-                                          value={rule.new || ""}
-                                          onChange={(e) =>
-                                            onUpdateRule(
-                                              activeGroup.column,
-                                              idx,
-                                              {
-                                                new: e.target.value,
-                                              },
-                                            )
-                                          }
-                                        />
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {rule.type === "length" && (
-                                    <div className="flex items-center gap-8 w-full">
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
-                                          最小
-                                        </span>
-                                        <Input
-                                          type="number"
-                                          className="w-20 text-center"
-                                          value={rule.min || ""}
-                                          onChange={(e) =>
-                                            onUpdateRule(
-                                              activeGroup.column,
-                                              idx,
-                                              {
-                                                min:
-                                                  parseInt(e.target.value) || 0,
-                                              },
-                                            )
-                                          }
-                                        />
-                                      </div>
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-[10px] font-black opacity-30 uppercase tracking-tighter">
-                                          最大
-                                        </span>
-                                        <Input
-                                          type="number"
-                                          className="w-20 text-center"
-                                          value={rule.max || ""}
-                                          onChange={(e) =>
-                                            onUpdateRule(
-                                              activeGroup.column,
-                                              idx,
-                                              {
-                                                max:
-                                                  parseInt(e.target.value) || 0,
-                                              },
-                                            )
-                                          }
-                                        />
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {(rule.type === "required" ||
-                                    rule.type === "date") && (
-                                    <div className="flex items-center gap-2 text-primary/60">
-                                      <CheckCircle2 className="h-4 w-4" />
-                                      <span className="text-[10px] font-black uppercase tracking-widest">
-                                        {rule.type === "required"
-                                          ? "字段不能为空"
-                                          : "转换为 YYYY-MM-DD 格式"}
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="pt-6">
-                                <button
-                                  onClick={() =>
-                                    onRemoveRule(activeGroup.column, idx)
-                                  }
-                                  className="h-10 w-10 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all duration-300 transform hover:rotate-12"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        ))}
+                            </motion.div>
+                          ))}
                       </AnimatePresence>
 
-                      {activeGroup.rules.length === 0 && (
-                        <div className="py-20 flex flex-col items-center justify-center text-muted-foreground/30 border-2 border-dashed border-primary/5 rounded-[32px]">
+                      {(!activeGroup.rules ||
+                        activeGroup.rules.length === 0) && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="py-20 flex flex-col items-center justify-center text-muted-foreground/30 border-2 border-dashed border-primary/5 rounded-[32px]"
+                        >
                           <div className="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
                             <Plus className="h-8 w-8" />
                           </div>
@@ -381,7 +459,7 @@ const RuleConfigPanel: React.FC<RuleConfigPanelProps> = ({
                           <p className="text-[10px] font-medium mt-2">
                             添加您的第一条规则以开始清洗此列数据
                           </p>
-                        </div>
+                        </motion.div>
                       )}
                     </div>
                   </div>

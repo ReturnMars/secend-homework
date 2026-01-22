@@ -31,9 +31,7 @@ export const DEFAULT_RULES: ColumnRuleGroup[] = [
   },
 ];
 
-export const useCleaningRules = (
-  initialRules: ColumnRuleGroup[] = DEFAULT_RULES,
-) => {
+export const useCleaningRules = (initialRules: ColumnRuleGroup[] = []) => {
   const [rules, setRules] = useState<ColumnRuleGroup[]>(initialRules);
   const [showRules, setShowRules] = useState(false);
 

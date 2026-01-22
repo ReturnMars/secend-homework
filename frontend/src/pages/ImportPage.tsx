@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import UploadDropZone from "../components/upload/UploadDropZone";
 import RuleConfigPanel from "../components/upload/RuleConfigPanel";
 import ProcessingStatus from "../components/upload/ProcessingStatus";
-import { useCleaningRules, DEFAULT_RULES } from "../hooks/useCleaningRules";
+import { useCleaningRules } from "../hooks/useCleaningRules";
 import { api, API_BASE_URL } from "../lib/api";
 import { sha256 } from "js-sha256";
 import { toast } from "sonner";
@@ -50,7 +50,7 @@ export default function ImportPage() {
     // Auto-detect columns for CSV files
     if (selectedFile.name.endsWith(".csv")) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const text = e.target?.result as string;
         const firstLine = text.split("\n")[0];
         if (!firstLine || firstLine.length < 2) return;
@@ -63,41 +63,20 @@ export default function ImportPage() {
 
         if (cols.length === 0) return;
 
-        // Match columns with DEFAULT_RULES
-        const initialRules: any[] = [];
-        let hasAddress = false;
-
-        cols.forEach((col) => {
-          const lowerCol = col.toLowerCase();
-          const defaultMatch = DEFAULT_RULES.find(
-            (dr) =>
-              (dr.column.toLowerCase() === lowerCol ||
-                col.includes(dr.column)) &&
-              !dr.column.startsWith("address_"),
+        try {
+          // Fetch suggested rules from backend
+          const suggestedRules = await api.post<any[]>(
+            "/upload/suggest-rules",
+            {
+              headers: cols,
+            },
           );
-
-          initialRules.push({
-            column: col,
-            rules: defaultMatch ? [...defaultMatch.rules] : [],
-          });
-
-          if (lowerCol.includes("address") || col.includes("地址")) {
-            hasAddress = true;
-          }
-        });
-
-        if (hasAddress) {
-          const addressRules = DEFAULT_RULES.filter((dr) =>
-            dr.column.startsWith("address_"),
-          );
-          addressRules.forEach((ar) => {
-            if (!initialRules.find((ir) => ir.column === ar.column)) {
-              initialRules.push({ ...ar, rules: [...ar.rules] });
-            }
-          });
+          setRules(suggestedRules);
+        } catch (err) {
+          console.error("Failed to fetch suggested rules:", err);
+          // Fallback to just headers with no rules
+          setRules(cols.map((col) => ({ column: col, rules: [] })));
         }
-
-        setRules(initialRules);
       };
       reader.readAsText(selectedFile.slice(0, 4096));
     }
