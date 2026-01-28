@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Database,
   Sparkles,
@@ -21,12 +21,46 @@ import { toast } from "sonner";
 
 export default function ImportPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<
     "idle" | "uploading" | "processing" | "completed" | "error"
   >("idle");
   const [batchId, setBatchId] = useState<string | null>(null);
   const [showRules, setShowRules] = useState(true);
+
+  // 初始化：检查 URL 是否有 batchId 参数
+  useEffect(() => {
+    const queryBatchId = searchParams.get("batchId");
+    if (queryBatchId) {
+      setBatchId(queryBatchId);
+      setPhase("processing");
+      // 可选：获取 Batch 详情以填充文件名等信息
+      api
+        .get(`/batches/${queryBatchId}`)
+        .then((res: any) => {
+          if (res) {
+            if (res.original_filename) {
+              // 模拟一个 File 对象用于显示标题
+              const mockFile = new File([], res.original_filename);
+              setFile(mockFile);
+            }
+            // 恢复清洗规则
+            if (res.rules) {
+              try {
+                const parsedRules = JSON.parse(res.rules);
+                if (Array.isArray(parsedRules)) {
+                  setRules(parsedRules);
+                }
+              } catch (e) {
+                console.error("Failed to parse batch rules:", e);
+              }
+            }
+          }
+        })
+        .catch(console.error);
+    }
+  }, [searchParams]);
 
   const [metrics, setMetrics] = useState({
     total: 0,

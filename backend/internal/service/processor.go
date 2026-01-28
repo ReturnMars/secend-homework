@@ -21,18 +21,18 @@ import (
 )
 
 // activeTasks 维护当前正在运行的任务，支持中断操作
-var (
-	activeTasks   = make(map[uint]context.CancelFunc)
-	activeTasksMu sync.Mutex
-)
+// var (
+// 	activeTasks   = make(map[uint]context.CancelFunc)
+// 	activeTasksMu sync.Mutex
+// )
 
-// CleanerService 是核心服务，提供数据清洗和处理功能
 // CleanerService 是核心服务，提供数据清洗和处理功能
 type CleanerService struct {
 	DB          *gorm.DB
 	batchSpeeds sync.Map      // 存储实时处理速度 (key: batchID, value: float64)
 	processSem  chan struct{} // 限制并发处理任务数，防止内存爆炸
 	Engine      *RuleEngine   // 规则引擎
+	Queue       *QueueService // 任务队列
 }
 
 // NewCleanerService 创建一个新的 CleanerService 实例
@@ -60,76 +60,87 @@ func NewCleanerService() *CleanerService {
 		DB:         repository.DB,
 		processSem: make(chan struct{}, limit),
 		Engine:     engine,
+		Queue:      NewQueueService(),
 	}
 }
 
-// ProcessFileAsync 启动协程异步处理文件
+// ProcessFileAsync 将任务推入 Redis 队列
 func (s *CleanerService) ProcessFileAsync(batchID uint, filePath string) {
+	err := s.Queue.EnqueueTask(batchID, filePath)
+	if err != nil {
+		log.Printf("[Queue] Failed to enqueue batch %d: %v", batchID, err)
+		s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+			Updates(map[string]interface{}{
+				"status": model.BatchStatusFailed,
+				"error":  fmt.Sprintf("Failed to enqueue: %v", err),
+			})
+		return
+	}
+	log.Printf("[Queue] Batch %d enqueued successfully", batchID)
+}
+
+// ProcessBatch 是 Worker 调用的核心处理逻辑
+func (s *CleanerService) ProcessBatch(ctx context.Context, batchID uint, filePath string) {
 	// 获取处理令牌（并发控制）
 	select {
 	case s.processSem <- struct{}{}:
-		log.Printf("[Queue] Batch %d starting processing", batchID)
+		log.Printf("[Worker] Batch %d starting processing", batchID)
 	default:
-		log.Printf("[Queue] Batch %d waiting for slot", batchID)
+		log.Printf("[Worker] Batch %d waiting for slot", batchID)
 		s.processSem <- struct{}{}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	activeTasksMu.Lock()
-	// 如果已有任务在运行，先取消（防止重复处理）
-	if oldCancel, exists := activeTasks[batchID]; exists {
-		oldCancel()
-	}
-	activeTasks[batchID] = cancel
-	activeTasksMu.Unlock()
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[PANIC] Batch %d processing panicked: %v", batchID, r)
-				// 确保即使 panic 也更新状态
-				s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
-					Updates(map[string]interface{}{
-						"status": model.BatchStatusFailed,
-						"error":  fmt.Sprintf("internal panic: %v", r),
-					})
-			}
-		}()
-		defer func() {
-			activeTasksMu.Lock()
-			delete(activeTasks, batchID)
-			activeTasksMu.Unlock()
-			// 释放令牌
-			<-s.processSem
-			// 清理该批次的速度统计缓存
-			s.batchSpeeds.Delete(batchID)
-		}()
-
-		// 获取当前批次以检查是否需要恢复进度
-		var batch model.ImportBatch
-		if err := s.DB.First(&batch, batchID).Error; err != nil {
-			log.Printf("[Crucial] Batch %d not found: %v", batchID, err)
-			return
-		}
-
-		err := s.processFileStream(ctx, batchID, filePath, batch.ProcessedRows, batch.Rules)
-		if err != nil {
-			// 如果是由于 Context 取消（暂停或取消），不需要标记为 Failed
-			if ctx.Err() != nil {
-				log.Printf("[Info] Batch %d processing interrupted: %v", batchID, ctx.Err())
-				return
-			}
-
-			log.Printf("[Crucial] Batch %d Failed: %v", batchID, err)
-			// 将错误信息记录到数据库，以便前端展示
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] Batch %d processing panicked: %v", batchID, r)
 			s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 				Updates(map[string]interface{}{
 					"status": model.BatchStatusFailed,
-					"error":  err.Error(),
+					"error":  fmt.Sprintf("internal panic: %v", r),
 				})
 		}
+		// 释放令牌
+		<-s.processSem
+		// 清理该批次的速度统计缓存
+		s.batchSpeeds.Delete(batchID)
 	}()
+
+	// 获取当前批次以检查是否需要恢复进度
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, batchID).Error; err != nil {
+		log.Printf("[Crucial] Batch %d not found: %v", batchID, err)
+		return
+	}
+
+	// 检查任务是否已经被取消
+	if batch.Status == model.BatchStatusCancelled {
+		log.Printf("[Worker] Batch %d was cancelled before start", batchID)
+		return
+	}
+
+	err := s.processFileStream(ctx, batchID, filePath, batch.ProcessedRows, batch.Rules)
+	if err != nil {
+		// 如果是主动取消/暂停（Context Canceled 或者是从 DB 读到的状态变更），不要报错 failed
+		if err == context.Canceled {
+			log.Printf("[Worker] Batch %d processing interrupted by context", batchID)
+			return
+		}
+
+		// 检查一下 DB 状态，如果已经是 Paused/Cancelled，也不要置为 Failed
+		var currentStatus model.BatchStatus
+		s.DB.Model(&model.ImportBatch{}).Select("status").Where("id = ?", batchID).Scan(&currentStatus)
+		if currentStatus == model.BatchStatusPaused || currentStatus == model.BatchStatusCancelled {
+			log.Printf("[Worker] Batch %d stopped (status: %s)", batchID, currentStatus)
+			return
+		}
+
+		log.Printf("[Crucial] Batch %d Failed: %v", batchID, err)
+		s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
+			Updates(map[string]interface{}{
+				"status": model.BatchStatusFailed,
+				"error":  err.Error(),
+			})
+	}
 }
 
 // processFileStream 使用流式迭代器处理文件以节省内存
@@ -194,11 +205,10 @@ func (s *CleanerService) processFileStream(ctx context.Context, batchID uint, fi
 	if err == nil {
 		s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).Update("status", model.BatchStatusIndexing)
 
-		// 关键：进入索引阶段后，从 activeTasks 移除，防止被错误中断
-		// 暂停请求会检测到 Indexing 状态并返回相应错误
-		activeTasksMu.Lock()
-		delete(activeTasks, batchID)
-		activeTasksMu.Unlock()
+		// 关键：进入索引阶段后，从 activeTasks 移除，防止被错误中断 - 已移除 activeTasks 逻辑
+		// activeTasksMu.Lock()
+		// delete(activeTasks, batchID)
+		// activeTasksMu.Unlock()
 	}
 
 	// 关键：无论成功还是中断（暂停/取消），都应尝试重建索引，以便用户在界面上能正常搜索已导入的数据
@@ -450,6 +460,22 @@ Loop:
 			lastLogTime = time.Now()
 		}
 
+		// [Added for Async Worker] 定期检查数据库状态以支持暂停/取消
+		// 每 2000 行检查一次 (batchSize is usually 2000 so this fits)
+		if stats.rowIdx%2000 == 0 {
+			var currentStatus model.BatchStatus
+			if err := s.DB.Model(&model.ImportBatch{}).Select("status").Where("id = ?", batchID).Scan(&currentStatus).Error; err == nil {
+				if currentStatus == model.BatchStatusPaused {
+					processErr = fmt.Errorf("batch paused by user")
+					break Loop
+				}
+				if currentStatus == model.BatchStatusCancelled {
+					processErr = fmt.Errorf("batch cancelled by user")
+					break Loop
+				}
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			// 关键点：当 Context 被取消时（暂停或取消），停止生产
@@ -588,30 +614,22 @@ func (s *CleanerService) createRecordFromRow(row []string, batchID uint, rowIdx 
 
 // PauseBatch 暂停正在运行的任务
 func (s *CleanerService) PauseBatch(batchID uint) error {
-	activeTasksMu.Lock()
-	cancel, exists := activeTasks[batchID]
-	activeTasksMu.Unlock()
-
-	if !exists {
-		// 任务不在运行中（可能已完成、已取消、或正在索引重建）
-		// 检查当前状态，避免覆盖已完成的状态
-		var batch model.ImportBatch
-		if err := s.DB.First(&batch, batchID).Error; err != nil {
-			return fmt.Errorf("batch not found: %w", err)
-		}
-		if batch.Status == model.BatchStatusCompleted {
-			return fmt.Errorf("batch already completed, cannot pause")
-		}
-		if batch.Status == model.BatchStatusIndexing {
-			return fmt.Errorf("batch is in indexing phase, cannot pause")
-		}
-		if batch.Status == model.BatchStatusPaused {
-			return nil // 已经是暂停状态
-		}
-		return fmt.Errorf("batch is not currently running")
+	// Worker 模式下，直接修改数据库状态即可。Worker 轮询会检测到并停止。
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, batchID).Error; err != nil {
+		return fmt.Errorf("batch not found: %w", err)
 	}
 
-	cancel()
+	if batch.Status == model.BatchStatusCompleted {
+		return fmt.Errorf("batch already completed, cannot pause")
+	}
+	if batch.Status == model.BatchStatusIndexing {
+		return fmt.Errorf("batch is in indexing phase, cannot pause")
+	}
+	if batch.Status == model.BatchStatusPaused {
+		return nil // 已经是暂停状态
+	}
+	// 如果是 Processing 或 Pending，都可以暂停
 	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 		Update("status", model.BatchStatusPaused).Error
 }
@@ -627,41 +645,31 @@ func (s *CleanerService) ResumeBatch(batchID uint) error {
 		return fmt.Errorf("only paused batches can be resumed")
 	}
 
-	// 重新拉起异步处理
-	s.ProcessFileAsync(batchID, batch.FilePath)
-	return nil
+	// 重新拉起异步处理 (Re-enqueue)
+	// 注意：Resume 时不需要改变 status 为 processing，Worker 取到任务后会改成 processing
+	// 但为了 UI 响应即时性，可以先改一下，或者让 Worker 改
+
+	// 重新推入队列
+	return s.Queue.EnqueueTask(batchID, batch.FilePath)
 }
 
 // CancelBatch 取消任务
 func (s *CleanerService) CancelBatch(batchID uint) error {
-	activeTasksMu.Lock()
-	cancel, exists := activeTasks[batchID]
-	activeTasksMu.Unlock()
-
-	if !exists {
-		// 任务不在运行中，检查当前状态
-		var batch model.ImportBatch
-		if err := s.DB.First(&batch, batchID).Error; err != nil {
-			return fmt.Errorf("batch not found: %w", err)
-		}
-		if batch.Status == model.BatchStatusCompleted {
-			return fmt.Errorf("batch already completed, cannot cancel")
-		}
-		if batch.Status == model.BatchStatusCancelled {
-			return nil // 已经是取消状态
-		}
-		if batch.Status == model.BatchStatusIndexing {
-			return fmt.Errorf("batch is in indexing phase, please wait")
-		}
-		// 对于 Paused 状态，允许取消
-		if batch.Status == model.BatchStatusPaused {
-			return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
-				Update("status", model.BatchStatusCancelled).Error
-		}
-		return fmt.Errorf("batch is not currently running")
+	var batch model.ImportBatch
+	if err := s.DB.First(&batch, batchID).Error; err != nil {
+		return fmt.Errorf("batch not found: %w", err)
 	}
 
-	cancel()
+	if batch.Status == model.BatchStatusCompleted {
+		return fmt.Errorf("batch already completed, cannot cancel")
+	}
+	if batch.Status == model.BatchStatusCancelled {
+		return nil // 已经是取消状态
+	}
+	if batch.Status == model.BatchStatusIndexing {
+		return fmt.Errorf("batch is in indexing phase, please wait")
+	}
+
 	return s.DB.Model(&model.ImportBatch{}).Where("id = ?", batchID).
 		Update("status", model.BatchStatusCancelled).Error
 }

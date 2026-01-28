@@ -165,7 +165,6 @@ export default function Dashboard() {
             <thead className="bg-muted/30 text-muted-foreground font-medium border-b border-border/50">
               <tr>
                 <th className="py-3 px-4 w-[40%] pl-6 font-medium">批次标识</th>
-                <th className="py-3 px-4 font-medium">清洗进度与性能</th>
                 <th className="py-3 px-4 font-medium">状态与控制</th>
                 <th className="py-3 px-4 text-right font-medium">日期</th>
                 <th className="py-3 px-4 w-10"></th>

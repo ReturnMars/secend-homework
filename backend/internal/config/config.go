@@ -29,6 +29,11 @@ type Config struct {
 		UploadDir string `yaml:"upload_dir"`
 	} `yaml:"server"`
 	CleaningRules interface{} `yaml:"cleaning_rules"`
+	Redis         struct {
+		Addr     string `yaml:"addr"`
+		Password string `yaml:"password"`
+		DB       int    `yaml:"db"`
+	} `yaml:"redis"`
 }
 
 func (c *Config) GetDatabaseDSN() string {

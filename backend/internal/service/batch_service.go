@@ -83,14 +83,6 @@ func (s *CleanerService) DeleteBatch(id uint) error {
 		return err
 	}
 
-	// 1. 中断正在进行的任务
-	activeTasksMu.Lock()
-	if cancel, exists := activeTasks[id]; exists {
-		cancel()
-		delete(activeTasks, id)
-	}
-	activeTasksMu.Unlock()
-
 	// 2. 数据库事务删除
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		// 删除记录版本 (RecordVersion)
